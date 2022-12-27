@@ -508,7 +508,8 @@ whiteSpace(char **str, Token **tok)
 static int
 token(char **str, Token **tok)
 {
-	return whiteSpace(str, tok) || keyword(str, tok) || identifier(str, tok) || constant(str, tok) || stringLit(str, tok) || punctuator(str, tok) || ppExtra(str, tok);
+	whiteSpace(str, tok);
+	return /* whiteSpace(str, tok) || */ keyword(str, tok) || identifier(str, tok) || constant(str, tok) || stringLit(str, tok) || punctuator(str, tok) || ppExtra(str, tok);
 }
 
 /*               *
