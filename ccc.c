@@ -52,7 +52,6 @@ int main(int argc, char **argv){
 	argc--;
 	argv++;
 
-
 	for(int i = 0; i < argc; i++){
 		FILE * cf = fopen(argv[i], "r");
 		
@@ -60,23 +59,21 @@ int main(int argc, char **argv){
 
 
 		Token *tok = genTokens(&strp);
-		while(tok->token != T_PPEXTRA){
-			printf("%-15s: %d %lf \"%.*s\"\n", tokenName[tok->token], tok->intValue, tok->floatValue, tok->end - tok->start, tok->start);
-			Token *t = tok;
-			tok = tok->next;
-			free(t);
+
+		Token *tmp = tok;
+		while(tmp->token != T_PPEXTRA){
+			printf("%-15s: %d %lf \"%.*s\"\n", tokenName[tmp->token], tmp->intValue, tmp->floatValue, tmp->end - tmp->start, tmp->start);
+			tmp = tmp->next;
 		}
 
+		AST *ast = genAST(&tok);
+		if(!ast)
+			printf("could not generate ast\n");
+		
+		
+		//TODO free tok
 		free(str);
 		fclose(cf);
 	}
-	
-	/*
-	for(int i = 0; i < argc; i++){
-		AST *ast = genAST(argv + i);
-		if(!ast)
-			printf("could not generate ast\n");
-	}
-	*/
 	return 0;
 }
