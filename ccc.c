@@ -72,6 +72,7 @@ int main(int argc, char **argv){
 		
 		
 		//TODO free tok
+		//TODO free ast
 		free(str);
 		fclose(cf);
 	}
