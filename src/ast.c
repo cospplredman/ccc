@@ -22,7 +22,9 @@ freeAST(AST *ast)
 AST*
 allocAST()
 {
-	return malloc(sizeof(AST));
+	//TODO make code more robust
+	//return (AST*)malloc(sizeof(AST));
+	return (AST*)calloc(1, sizeof(AST));
 }
 
 // iso c99 69
@@ -49,6 +51,7 @@ constant(Token **tok, AST **ast)
 		case T_FLOATCONST:
 		case T_CHARCONST:
 		case T_STRINGLIT:
+			//TODO deal with strings properly
 			(*ast)->type = A_INTLIT;
 			(*ast)->intValue = (*tok)->intValue;
 			*tok = (*tok)->next;
@@ -131,13 +134,6 @@ initializerList(Token **tok, AST *ast)
 	return 0;
 }
 
-static int
-assignmentExpr(Token **tok, AST *ast)
-{
-	//TODO
-	return 0;
-}
-
 // iso c99 70
 static int
 argumentExprList(Token **tok, AST **ast)
@@ -170,6 +166,7 @@ postfixExpr(Token **tok, AST **ast)
 				case T_LBRACE:
 					tmp = tmp->next;
 					ramp = allocAST();
+
 					if(expr(&tmp, &ramp) && tmp->token == T_RBRACE){
 						tmp = tmp->next;
 						amp->right = ramp;
@@ -177,6 +174,7 @@ postfixExpr(Token **tok, AST **ast)
 					}else{
 						freeAST(ramp);
 					}
+
 					ramp = NULL;
 					break;
 				/*
@@ -368,6 +366,7 @@ unaryExpr(Token **tok, AST **ast)
 	return postfixExpr(tok, ast);
 }
 
+// iso c99 82
 static int
 mulExpr(Token **tok, AST **ast)
 {
@@ -423,6 +422,7 @@ mulExpr(Token **tok, AST **ast)
 	return 0;
 }
 
+// iso c99 82
 static int
 addExpr(Token **tok, AST **ast)
 {
@@ -468,6 +468,7 @@ addExpr(Token **tok, AST **ast)
 	return 0;
 }
 
+// iso c99 84
 static int
 shiftExpr(Token **tok, AST **ast)
 {
@@ -513,6 +514,7 @@ shiftExpr(Token **tok, AST **ast)
 	return 0;
 }
 
+// iso c99 85
 static int
 relExpr(Token **tok, AST **ast)
 {
@@ -577,7 +579,8 @@ relExpr(Token **tok, AST **ast)
 
 	return 0;
 }
-	
+
+// iso c99 86
 static int
 eqExpr(Token **tok, AST **ast)
 {
@@ -623,6 +626,7 @@ eqExpr(Token **tok, AST **ast)
 	return 0;
 }
 
+// iso c99 87
 static int
 andExpr(Token **tok, AST **ast){
 	AST *lamp = allocAST();
@@ -657,6 +661,7 @@ andExpr(Token **tok, AST **ast){
 	return 0;
 }
 
+// iso c99 88
 static int
 xorExpr(Token **tok, AST **ast){
 	AST *lamp = allocAST();
@@ -691,6 +696,7 @@ xorExpr(Token **tok, AST **ast){
 	return 0;
 }
 
+// iso c99 88
 static int
 orExpr(Token **tok, AST **ast){
 	AST *lamp = allocAST();
@@ -725,6 +731,7 @@ orExpr(Token **tok, AST **ast){
 	return 0;
 }
 
+// iso c99 89
 static int
 bandExpr(Token **tok, AST **ast){
 	AST *lamp = allocAST();
@@ -759,6 +766,7 @@ bandExpr(Token **tok, AST **ast){
 	return 0;
 }
 
+// iso c99 89
 static int
 borExpr(Token **tok, AST **ast){
 	AST *lamp = allocAST();
@@ -793,6 +801,7 @@ borExpr(Token **tok, AST **ast){
 	return 0;
 }
 
+// iso c99 90
 static int
 elvisExpr(Token **tok, AST **ast){
 	AST *lamp = allocAST();
@@ -829,32 +838,68 @@ elvisExpr(Token **tok, AST **ast){
 	return 0;
 }
 
+// iso c99 91
 static int
-expr(Token **tok, AST **ast)
+assignmentExpr(Token **tok, AST **ast)
 {
+	return elvisExpr(tok, ast);
 	//TODO
 	return 0;
 }
+
+//TODO
+// iso c99 ?? 
+static int
+expr(Token **tok, AST **ast)
+{
+	return assignmentExpr(tok, ast) || elvisExpr(tok, ast);
+}
+
+static const char* astName[] = {
+	"A_IDENT", "A_INTLIT", "A_STRLIT",
+
+	"A_MEMBER", "A_ARROW", "A_PINC", "A_PDEC", "A_INC", "A_DEC", "A_SIZEOF",
+	"A_ADDR", "A_UDEREF", "A_DEREF", "A_UADD", "A_USUB", "A_BNEG", "A_NEG",
+	"A_ADD", "A_SUB", "A_MUL", "A_DIV", "A_MOD", "A_CAST", "A_LSHIFT", "A_RSHIFT",
+
+	"A_LT", "A_GT", "A_LTEQ", "A_GTEQ",
+
+	"A_EQUALS", "A_NOTEQUALS",
+
+	"A_AND",
+
+	"A_XOR",
+
+	"A_OR",
+
+	"A_BAND",
+
+	"A_BOR",
+
+	"A_ELVIS"
+};
 
 void
 printAST(AST *ast)
 {
 	if(ast == NULL)
 		return;
+	
+	printf("(");
 	if(ast->type == A_INTLIT){
-		printf("%d ", ast->intValue);
+		printf("%d", ast->intValue);
+		printf(")");
 		return;
 	}
 	
 	if(ast->type == A_IDENT){
-		printf("%.*s ", ast->end - ast->start, ast->start);
+		printf("%.*s", ast->end - ast->start, ast->start);
+		printf(")");
 		return;
 	}
 
-	printf("%d ", ast->type);
-	printf("(");
+	printf("%s", astName[ast->type]);
 	printAST(ast->left);
-	printf(") (");
 	printAST(ast->right);
 	printf(")");
 }
@@ -863,10 +908,7 @@ AST*
 genAST(Token **tok)
 {
 	AST *ast = allocAST();
-	if(relExpr(tok, &ast)){
-		printAST(ast);
-		printf("\n");
+	if(relExpr(tok, &ast))
 		return ast;
-	}
 	return NULL;
 }

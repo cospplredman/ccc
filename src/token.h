@@ -37,15 +37,21 @@ enum{
 
 typedef struct Token{
 	int token;
-	struct Token *next;
 	char *start, *end;
+	
 	union{
 		long long int intValue;
 		double floatValue;
 		char *stringValue;
 	};
+
+	struct Token *next;
 } Token;
+
+Token *allocToken();
+void freeToken(Token *tok);
 
 Token *genTokens(char **str);
 Token *genPPTokens(char **str);
-
+void printToken(Token *tok);
+void printTokens(Token *tok);

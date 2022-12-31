@@ -40,4 +40,5 @@ typedef struct AST{
 
 void freeAST(AST *);
 AST *allocAST();
+void printAST(AST *);
 AST *genAST(Token **);
