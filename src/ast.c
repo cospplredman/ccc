@@ -155,9 +155,10 @@ postfixExpr(Token **tok, AST **ast)
 	}
 
 	AST *lamp = allocAST();
-	if(primaryExpr(tok, &lamp)){
+	Token *tmp = *tok;
+	
+	if(primaryExpr(&tmp, &lamp)){
 		AST *amp = lamp, *ramp;
-		Token *tmp = *tok;
 		
 		//TODO fix
 		while(1){
@@ -165,10 +166,9 @@ postfixExpr(Token **tok, AST **ast)
 			tamp->left = amp;
 			amp = tamp;
 
-			Token *pmp = tmp;
-			tmp = tmp->next;
-			switch(pmp->token){
+			switch(tmp->token){
 				case T_LBRACE:
+					tmp = tmp->next;
 					ramp = allocAST();
 					if(expr(&tmp, &ramp) && tmp->token == T_RBRACE){
 						tmp = tmp->next;
@@ -179,15 +179,16 @@ postfixExpr(Token **tok, AST **ast)
 					}
 					ramp = NULL;
 					break;
+				/*
 				case T_LPAREN:
-					/*
 					ramp = allocAST();
 					if(argumentExprList(&tmp, &ramp)){
 						//todo a_call	
 					}
-					*/
 					break;
+				*/
 				case T_DOT:
+					tmp = tmp->next;
 					ramp = allocAST();
 					if(identifier(&tmp, &ramp)){
 						amp->right = ramp;
@@ -198,6 +199,7 @@ postfixExpr(Token **tok, AST **ast)
 					ramp = NULL;
 					break;
 				case T_ARROW:
+					tmp = tmp->next;
 					ramp = allocAST();
 					if(identifier(&tmp, &ramp)){
 						amp->right = ramp;
@@ -208,11 +210,13 @@ postfixExpr(Token **tok, AST **ast)
 					ramp = NULL;
 					break;
 				case T_INC:
+					tmp = tmp->next;
 					freeAST(ramp);
 					amp->right = NULL;
 					amp->type = A_PINC;
 					break;
 				case T_DEC:
+					tmp = tmp->next;
 					freeAST(ramp);
 					amp->right = NULL;
 					amp->type = A_PDEC;
@@ -262,7 +266,6 @@ castExpr(Token **tok, AST **ast){
 		freeAST(lamp);
 		freeAST(ramp);
 	}
-
 	return unaryExpr(tok, ast);
 }
 
@@ -291,6 +294,7 @@ unaryExpr(Token **tok, AST **ast)
 				return 1;
 			}
 			break;
+		/*
 		case T_SIZEOF:
 			if(unaryExpr(&tmp, &lamp)){
 				//TODO generate int literal
@@ -303,6 +307,7 @@ unaryExpr(Token **tok, AST **ast)
 				}
 			}
 			break;
+		*/
 		case T_AND:
 			if(castExpr(&tmp, &lamp)){
 				*tok = tmp;
@@ -364,9 +369,463 @@ unaryExpr(Token **tok, AST **ast)
 }
 
 static int
-mulOper(Token **tok, AST **ast)
+mulExpr(Token **tok, AST **ast)
 {
-	//TODO
+	AST *lamp = allocAST();
+	AST *ramp = allocAST();
+	Token *tmp = *tok;
+
+	if(castExpr(&tmp, &lamp)){
+		switch(tmp->token){
+			case T_STAR:
+				tmp = tmp->next;
+				if(castExpr(&tmp, &ramp)){
+					*tok = tmp;
+					(*ast)->left = lamp;
+					(*ast)->right = ramp;
+					(*ast)->type = A_MUL;
+					return 1;
+				}
+			break;
+			case T_SLASH:
+				tmp = tmp->next;
+				if(castExpr(&tmp, &ramp)){
+					*tok = tmp;
+					(*ast)->left = lamp;
+					(*ast)->right = ramp;
+					(*ast)->type = A_DIV;
+					return 1;
+				}
+			break;
+			case T_PERCENT:
+				tmp = tmp->next;
+				if(castExpr(&tmp, &ramp)){
+					*tok = tmp;
+					(*ast)->left = lamp;
+					(*ast)->right = ramp;
+					(*ast)->type = A_MOD;
+					return 1;
+				}
+			break;
+		}
+
+		*tok = tmp;
+		**ast = *lamp;
+		lamp->left = lamp->right = NULL;
+		freeAST(lamp);
+		freeAST(ramp);
+		return 1;
+	}
+	
+	freeAST(lamp);
+	freeAST(ramp);
+
+	return 0;
+}
+
+static int
+addExpr(Token **tok, AST **ast)
+{
+	AST *lamp = allocAST();
+	AST *ramp = allocAST();
+	Token *tmp = *tok;
+
+	if(mulExpr(&tmp, &lamp)){
+		switch(tmp->token){
+			case T_PLUS:
+				tmp = tmp->next;
+				if(mulExpr(&tmp, &ramp)){
+					*tok = tmp;
+					(*ast)->left = lamp;
+					(*ast)->right = ramp;
+					(*ast)->type = A_ADD;
+					return 1;
+				}
+			break;
+			case T_MINUS:
+				tmp = tmp->next;
+				if(mulExpr(&tmp, &ramp)){
+					*tok = tmp;
+					(*ast)->left = lamp;
+					(*ast)->right = ramp;
+					(*ast)->type = A_SUB;
+					return 1;
+				}
+			break;
+		}
+
+		*tok = tmp;
+		**ast = *lamp;
+		lamp->left = lamp->right = NULL;
+		freeAST(lamp);
+		freeAST(ramp);
+		return 1;
+	}
+	
+	freeAST(lamp);
+	freeAST(ramp);
+
+	return 0;
+}
+
+static int
+shiftExpr(Token **tok, AST **ast)
+{
+	AST *lamp = allocAST();
+	AST *ramp = allocAST();
+	Token *tmp = *tok;
+
+	if(addExpr(&tmp, &lamp)){
+		switch(tmp->token){
+			case T_LSHIFT:
+				tmp = tmp->next;
+				if(addExpr(&tmp, &ramp)){
+					*tok = tmp;
+					(*ast)->left = lamp;
+					(*ast)->right = ramp;
+					(*ast)->type = A_LSHIFT;
+					return 1;
+				}
+			break;
+			case T_RSHIFT:
+				tmp = tmp->next;
+				if(addExpr(&tmp, &ramp)){
+					*tok = tmp;
+					(*ast)->left = lamp;
+					(*ast)->right = ramp;
+					(*ast)->type = A_RSHIFT;
+					return 1;
+				}
+			break;
+		}
+
+		*tok = tmp;
+		**ast = *lamp;
+		lamp->left = lamp->right = NULL;
+		freeAST(lamp);
+		freeAST(ramp);
+		return 1;
+	}
+	
+	freeAST(lamp);
+	freeAST(ramp);
+
+	return 0;
+}
+
+static int
+relExpr(Token **tok, AST **ast)
+{
+	AST *lamp = allocAST();
+	AST *ramp = allocAST();
+	Token *tmp = *tok;
+
+	if(shiftExpr(&tmp, &lamp)){
+		switch(tmp->token){
+			case T_LT:
+				tmp = tmp->next;
+				if(shiftExpr(&tmp, &ramp)){
+					*tok = tmp;
+					(*ast)->left = lamp;
+					(*ast)->right = ramp;
+					(*ast)->type = A_LT;
+					return 1;
+				}
+			break;
+			case T_GT:
+				tmp = tmp->next;
+				if(shiftExpr(&tmp, &ramp)){
+					*tok = tmp;
+					(*ast)->left = lamp;
+					(*ast)->right = ramp;
+					(*ast)->type = A_GT;
+					return 1;
+				}
+			break;
+			case T_LTEQ:
+				tmp = tmp->next;
+				if(shiftExpr(&tmp, &ramp)){
+					*tok = tmp;
+					(*ast)->left = lamp;
+					(*ast)->right = ramp;
+					(*ast)->type = A_LTEQ;
+					return 1;
+				}
+			break;
+			case T_GTEQ:
+				tmp = tmp->next;
+				if(shiftExpr(&tmp, &ramp)){
+					*tok = tmp;
+					(*ast)->left = lamp;
+					(*ast)->right = ramp;
+					(*ast)->type = A_GTEQ;
+					return 1;
+				}
+			break;
+		}
+
+		*tok = tmp;
+		**ast = *lamp;
+		lamp->left = lamp->right = NULL;
+		freeAST(lamp);
+		freeAST(ramp);
+		return 1;
+	}
+	
+	freeAST(lamp);
+	freeAST(ramp);
+
+	return 0;
+}
+	
+static int
+eqExpr(Token **tok, AST **ast)
+{
+	AST *lamp = allocAST();
+	AST *ramp = allocAST();
+	Token *tmp = *tok;
+
+	if(relExpr(&tmp, &lamp)){
+		switch(tmp->token){
+			case T_EQUAL:
+				tmp = tmp->next;
+				if(relExpr(&tmp, &ramp)){
+					*tok = tmp;
+					(*ast)->left = lamp;
+					(*ast)->right = ramp;
+					(*ast)->type = A_EQUALS;
+					return 1;
+				}
+			break;
+			case T_NOTEQUAL:
+				tmp = tmp->next;
+				if(relExpr(&tmp, &ramp)){
+					*tok = tmp;
+					(*ast)->left = lamp;
+					(*ast)->right = ramp;
+					(*ast)->type = A_NOTEQUALS;
+					return 1;
+				}
+			break;
+		}
+
+		*tok = tmp;
+		**ast = *lamp;
+		lamp->left = lamp->right = NULL;
+		freeAST(lamp);
+		freeAST(ramp);
+		return 1;
+	}
+	
+	freeAST(lamp);
+	freeAST(ramp);
+
+	return 0;
+}
+
+static int
+andExpr(Token **tok, AST **ast){
+	AST *lamp = allocAST();
+	AST *ramp = allocAST();
+	Token *tmp = *tok;
+
+	if(eqExpr(&tmp, &lamp)){
+		switch(tmp->token){
+			case T_AND:
+				tmp = tmp->next;
+				if(eqExpr(&tmp, &ramp)){
+					*tok = tmp;
+					(*ast)->left = lamp;
+					(*ast)->right = ramp;
+					(*ast)->type = A_AND;
+					return 1;
+				}
+			break;
+		}
+
+		*tok = tmp;
+		**ast = *lamp;
+		lamp->left = lamp->right = NULL;
+		freeAST(lamp);
+		freeAST(ramp);
+		return 1;
+	}
+	
+	freeAST(lamp);
+	freeAST(ramp);
+
+	return 0;
+}
+
+static int
+xorExpr(Token **tok, AST **ast){
+	AST *lamp = allocAST();
+	AST *ramp = allocAST();
+	Token *tmp = *tok;
+
+	if(andExpr(&tmp, &lamp)){
+		switch(tmp->token){
+			case T_XOR:
+				tmp = tmp->next;
+				if(andExpr(&tmp, &ramp)){
+					*tok = tmp;
+					(*ast)->left = lamp;
+					(*ast)->right = ramp;
+					(*ast)->type = A_XOR;
+					return 1;
+				}
+			break;
+		}
+
+		*tok = tmp;
+		**ast = *lamp;
+		lamp->left = lamp->right = NULL;
+		freeAST(lamp);
+		freeAST(ramp);
+		return 1;
+	}
+	
+	freeAST(lamp);
+	freeAST(ramp);
+
+	return 0;
+}
+
+static int
+orExpr(Token **tok, AST **ast){
+	AST *lamp = allocAST();
+	AST *ramp = allocAST();
+	Token *tmp = *tok;
+
+	if(xorExpr(&tmp, &lamp)){
+		switch(tmp->token){
+			case T_OR:
+				tmp = tmp->next;
+				if(xorExpr(&tmp, &ramp)){
+					*tok = tmp;
+					(*ast)->left = lamp;
+					(*ast)->right = ramp;
+					(*ast)->type = A_OR;
+					return 1;
+				}
+			break;
+		}
+
+		*tok = tmp;
+		**ast = *lamp;
+		lamp->left = lamp->right = NULL;
+		freeAST(lamp);
+		freeAST(ramp);
+		return 1;
+	}
+	
+	freeAST(lamp);
+	freeAST(ramp);
+
+	return 0;
+}
+
+static int
+bandExpr(Token **tok, AST **ast){
+	AST *lamp = allocAST();
+	AST *ramp = allocAST();
+	Token *tmp = *tok;
+
+	if(orExpr(&tmp, &lamp)){
+		switch(tmp->token){
+			case T_BAND:
+				tmp = tmp->next;
+				if(orExpr(&tmp, &ramp)){
+					*tok = tmp;
+					(*ast)->left = lamp;
+					(*ast)->right = ramp;
+					(*ast)->type = A_BAND;
+					return 1;
+				}
+			break;
+		}
+
+		*tok = tmp;
+		**ast = *lamp;
+		lamp->left = lamp->right = NULL;
+		freeAST(lamp);
+		freeAST(ramp);
+		return 1;
+	}
+	
+	freeAST(lamp);
+	freeAST(ramp);
+
+	return 0;
+}
+
+static int
+borExpr(Token **tok, AST **ast){
+	AST *lamp = allocAST();
+	AST *ramp = allocAST();
+	Token *tmp = *tok;
+
+	if(bandExpr(&tmp, &lamp)){
+		switch(tmp->token){
+			case T_BOR:
+				tmp = tmp->next;
+				if(bandExpr(&tmp, &ramp)){
+					*tok = tmp;
+					(*ast)->left = lamp;
+					(*ast)->right = ramp;
+					(*ast)->type = A_BOR;
+					return 1;
+				}
+			break;
+		}
+
+		*tok = tmp;
+		**ast = *lamp;
+		lamp->left = lamp->right = NULL;
+		freeAST(lamp);
+		freeAST(ramp);
+		return 1;
+	}
+	
+	freeAST(lamp);
+	freeAST(ramp);
+
+	return 0;
+}
+
+static int
+elvisExpr(Token **tok, AST **ast){
+	AST *lamp = allocAST();
+	AST *ramp = allocAST();
+	Token *tmp = *tok;
+
+	if(borExpr(&tmp, &lamp)){
+		/*
+		//TODO
+		switch(tmp->token){
+			case T_BAND:
+				tmp = tmp->next;
+				if(borExpr(&tmp, &ramp)){
+					*tok = tmp;
+					(*ast)->left = lamp;
+					(*ast)->right = ramp;
+					(*ast)->type = A_BAND;
+					return 1;
+				}
+			break;
+		}
+		*/
+		*tok = tmp;
+		**ast = *lamp;
+		lamp->left = lamp->right = NULL;
+		freeAST(lamp);
+		freeAST(ramp);
+		return 1;
+	}
+	
+	freeAST(lamp);
+	freeAST(ramp);
+
 	return 0;
 }
 
@@ -404,7 +863,7 @@ AST*
 genAST(Token **tok)
 {
 	AST *ast = allocAST();
-	if(unaryExpr(tok, &ast)){
+	if(relExpr(tok, &ast)){
 		printAST(ast);
 		printf("\n");
 		return ast;
