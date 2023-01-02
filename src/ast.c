@@ -759,5 +759,6 @@ genAST(Token **tok)
 	AST *ast = allocAST();
 	if(expr(tok, ast))
 		return ast;
+	freeAST(ast);
 	return NULL;
 }

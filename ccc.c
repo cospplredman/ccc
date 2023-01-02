@@ -40,7 +40,8 @@ int main(int argc, char **argv){
 		Token *tok = genTokens(&strp);
 		printTokens(tok);
 
-		AST *ast = genAST(&tok);
+		Token *ttok = tok;
+		AST *ast = genAST(&ttok);
 		if(!ast)
 			printf("could not generate ast\n");
 		else

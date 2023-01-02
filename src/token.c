@@ -695,36 +695,37 @@ void
 printTokens(Token *tok)
 {
 	printToken(tok);
-	while(tok->next){
-		tok = tok->next;
-		printToken(tok);
-	}
+	if(tok->next)
+		printTokens(tok->next);
 }
 
 Token*
 allocToken()
 {
-	return (Token*)malloc(sizeof(Token));
+	Token *q = (Token*)malloc(sizeof(Token));
+	printf("allocToken %p\n", q);
+	return q;
 }
 
 void
 freeToken(Token *tok)
 {
+	printf("freeToken %p\n", tok);
 	if(tok->next)
-		free(tok->next);
+		freeToken(tok->next);
 	free(tok);
 }
 
 Token*
 genTokens(char **str)
 {
-	Token *tok = malloc(sizeof(Token));
+	Token *tok = allocToken();
 	Token *ctok = tok;
 	while(1){
 		token(str, ctok);
 		if(ctok->token == T_PPEXTRA)
 			return tok;
-		ctok->next = malloc(sizeof(Token));
+		ctok->next = allocToken();
 		ctok = ctok->next; 
 	}
 }
