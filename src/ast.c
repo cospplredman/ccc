@@ -156,121 +156,96 @@ postfixExpr(Token **tok, AST *ast)
 		//TODO
 	}
 
-	AST *lamp = allocAST();
-	AST *ramp;
+	AST tl, tr;
+	AST *lamp, *ramp;
 	Token *tmp = *tok;
+	int type = -1;
 	
-	if(primaryExpr(&tmp, lamp)){
-		
-		//TODO fix
+	if(primaryExpr(&tmp, &tl)){
 		while(1){
-			AST *tamp = allocAST();
-			tamp->left = lamp;
-			lamp = tamp;
+			Token *ttmp = tmp;
+			lamp = allocAST();
+			*lamp = tl;
+			tl.left = lamp;
 
+			type = -1;
 			switch(tmp->token){
-				case T_LBRACE:
-					tmp = tmp->next;
-					ramp = allocAST();
-
-					if(expr(&tmp, ramp) && tmp->token == T_RBRACE){
-						tmp = tmp->next;
-						lamp->right = ramp;
-						lamp->type = A_DEREF;
-					}else{
-						freeAST(ramp);
-					}
-
-					ramp = NULL;
-					break;
-				/*
-				case T_LPAREN:
-					ramp = allocAST();
-					if(argumentExprList(&tmp, &ramp)){
-						//todo a_call	
-					}
-					break;
-				*/
-				case T_DOT:
-					tmp = tmp->next;
-					ramp = allocAST();
-					if(identifier(&tmp, ramp)){
-						lamp->right = ramp;
-						lamp->type = A_MEMBER;
-					}else{
-						freeAST(ramp);
-					}
-					ramp = NULL;
-					break;
-				case T_ARROW:
-					tmp = tmp->next;
-					ramp = allocAST();
-					if(identifier(&tmp, ramp)){
-						lamp->right = ramp;
-						lamp->type = A_ARROW;
-					}else{
-						freeAST(ramp);
-					}
-					ramp = NULL;
-					break;
-				case T_INC:
-					tmp = tmp->next;
-					freeAST(ramp);
-					lamp->right = NULL;
-					lamp->type = A_PINC;
-					break;
-				case T_DEC:
-					tmp = tmp->next;
-					freeAST(ramp);
-					lamp->right = NULL;
-					lamp->type = A_PDEC;
-					break;
-				default:
-					*tok = tmp;
-					lamp = tamp->left;
-					tamp->left = NULL;
-					freeAST(tamp);
-					
-					*ast = *lamp;
-					lamp->left = lamp->right = NULL;
-					freeAST(lamp);
-					return 1;
-					break;
+				case T_DOT: type = A_MEMBER; break;
+				case T_ARROW: type = A_ARROW; break;
 			}
+
+			ttmp = tmp->next;
+			if(type >= 0 && identifier(&ttmp, &tr)){
+				tmp = ttmp;
+				ramp = allocAST();
+				*ramp = tr;
+
+				tl = (AST){
+					type,
+					.left = tl.left,
+					.right = ramp
+				};
+				continue;
+			}
+
+			ttmp = tmp->next;
+			if(tmp->token == T_LBRACE && expr(&ttmp, &tr) && ttmp->token == T_RBRACE){
+				tmp = ttmp->next;
+				ramp = allocAST();
+				*ramp = tr;
+
+				tl = (AST){
+					A_DEREF,
+					.left = tl.left,
+					.right = ramp
+				};
+				continue;
+			}
+			
+			ttmp = tmp->next;
+			if(tmp->token == T_LPAREN && argumentExprList(&tmp, &tr) && ttmp->token == T_RPAREN){
+				tmp = ttmp->next;
+				ramp = allocAST();
+				*ramp = tr;
+
+				tl = (AST){
+					A_CALL,
+					.left = tl.left,
+					.right = ramp
+				};
+				continue;
+			}
+
+			type = -1;
+			switch(tmp->token){
+				case T_INC: type = A_PINC; break;
+				case T_DEC: type = A_PDEC; break;
+			}
+
+			if(type < 0)
+				break;
+
+			tl = (AST){
+				type,
+				.left = tl.left,
+				.right = NULL
+			};
+				
 		}
+
+		*tok = tmp;
+		lamp = tl.left;
+		
+		*ast = *lamp;
+		lamp->left = lamp->right = NULL;
+		freeAST(lamp);
+		return 1;
 	}
 
-	freeAST(lamp);
 	return 0;
 }
 
-static int unaryExpr(Token **, AST *);
-
-// iso c99 78
-static int
-castExpr(Token **tok, AST *ast){
-	// todo
-	if((*tok)->token == T_LPAREN){
-		Token *tmp = (*tok)->next;
-		AST *lamp = allocAST();
-		AST *ramp = allocAST();
-		if(typeName(&tmp, lamp)){
-			if(tmp->token == T_RPAREN){
-				tmp = tmp->next;
-				if(castExpr(&tmp, ramp)){
-					*tok = tmp;
-					ast->left = lamp;
-					ast->right = ramp;
-					ast->type = A_CAST;
-					return 1;
-				}
-			}
-		}	
-		freeAST(lamp);
-		freeAST(ramp);
-	}
-	return unaryExpr(tok, ast);
-}
+static int castExpr(Token **, AST *);
 
 // iso c99 78
 static int
@@ -321,6 +296,32 @@ unaryExpr(Token **tok, AST *ast)
 	}
 
 	return postfixExpr(tok, ast);
+}
+
+// iso c99 78
+static int
+castExpr(Token **tok, AST *ast){
+	// todo
+	if((*tok)->token == T_LPAREN){
+		Token *tmp = (*tok)->next;
+		AST *lamp = allocAST();
+		AST *ramp = allocAST();
+		if(typeName(&tmp, lamp)){
+			if(tmp->token == T_RPAREN){
+				tmp = tmp->next;
+				if(castExpr(&tmp, ramp)){
+					*tok = tmp;
+					ast->left = lamp;
+					ast->right = ramp;
+					ast->type = A_CAST;
+					return 1;
+				}
+			}
+		}	
+		freeAST(lamp);
+		freeAST(ramp);
+	}
+	return unaryExpr(tok, ast);
 }
 
 static int
@@ -617,7 +618,8 @@ static const char* astName[] = {
 
 	"A_BOR",
 
-	"A_ELVIS"
+	"A_ELVIS",
+	"A_CALL"
 };
 
 void
