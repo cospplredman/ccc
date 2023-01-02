@@ -19,6 +19,21 @@ freeAST(AST *ast)
 	}
 }
 
+void
+freeASTLeaves(AST *ast)
+{
+	if(ast){
+		switch(ast->type){
+			case A_IDENT:
+			case A_INTLIT:
+			break;
+			default:
+			freeAST(ast->left);
+			freeAST(ast->right);
+		}
+	}
+}
+
 AST*
 allocAST()
 {
@@ -234,8 +249,7 @@ postfixExpr(Token **tok, AST *ast)
 					};
 					continue;
 				}
-				freeAST(tr.left);
-				freeAST(tr.right);
+				freeASTLeaves(&tr);
 			}
 			
 			ttmp = tmp->next;
@@ -243,6 +257,7 @@ postfixExpr(Token **tok, AST *ast)
 			       	if(!argumentExprList(&ttmp, &tr))
 					tr = (AST){.left = NULL, .right = NULL};
 				if(ttmp->token == T_RPAREN){
+				freeAST(tr.right);
 					tmp = ttmp->next;
 					ramp = allocAST();
 					*ramp = tr;
@@ -254,8 +269,7 @@ postfixExpr(Token **tok, AST *ast)
 					};
 					continue;
 				}
-				freeAST(tr.left);
-				freeAST(tr.right);
+				freeASTLeaves(&tr);
 			}
 
 			type = -1;
@@ -622,12 +636,60 @@ elvisExpr(Token **tok, AST *ast)
 	return 0;
 }
 
+static int
+assignmentOper(int token){
+	int type = -1;
+	switch(token){
+		case T_EQ: type = A_EQ; break;
+		case T_MULEQ: type = A_MULEQ; break;
+		case T_DIVEQ: type = A_DIVEQ; break;
+		case T_MODEQ: type = A_MODEQ; break;
+		case T_ADDEQ: type = A_ADDEQ; break;
+		case T_SUBEQ: type = A_SUBEQ; break;
+		case T_LSHIFTEQ: type = A_LSHIFTEQ; break;
+		case T_RSHIFTEQ: type = A_RSHIFTEQ; break;
+		case T_ANDEQ: type = A_ANDEQ; break;
+		case T_XOREQ: type = A_XOREQ; break;
+		case T_OREQ: type = A_OREQ; break;
+	}
+
+	return type;
+}
+
 // iso c99 91
 static int
 assignmentExpr(Token **tok, AST *ast)
 {
-	return elvisExpr(tok, ast);
-	//TODO
+	AST tl, tr;
+	AST *lamp, *ramp;
+	Token *tmp = *tok;
+	int type;
+
+	if(unaryExpr(&tmp, &tl)){
+		type = assignmentOper(tmp->token);
+		tmp = tmp->next;
+		if(type >= 0 && assignmentExpr(&tmp, &tr)){
+			lamp = allocAST();
+			ramp = allocAST();
+			*lamp = tl;
+			*ramp = tr;
+
+			*ast = (AST){
+				type,
+				.left = lamp,
+				.right = ramp
+			};
+
+			*tok = tmp;
+			return 1;
+		}
+		
+		freeASTLeaves(&tl);
+	}
+
+	if(elvisExpr(tok, ast))
+		return 1;
+	
 	return 0;
 }
 
@@ -662,7 +724,8 @@ static const char* astName[] = {
 
 	"A_ELVIS",
 	"A_CALL",
-	"A_EXPRLIST"
+	"A_EXPRLIST",
+	"A_EQ", "A_MULEQ", "A_DIVEQ", "A_MODEQ", "A_ADDEQ", "A_SUBEQ", "A_LSHIFTEQ", "A_RSHIFTEQ", "A_ANDEQ", "A_XOREQ", "A_OREQ"
 };
 
 void
