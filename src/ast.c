@@ -140,12 +140,44 @@ initializerList(Token **tok, AST *ast)
 	return 0;
 }
 
+static int assignmentExpr(Token **, AST *);
+
+static int
+exprList(Token **tok, AST *ast)
+{
+	AST tl, tr;
+	AST *lamp, *ramp = NULL;
+	Token *tmp = *tok;
+	
+	if(assignmentExpr(&tmp, &tl)){
+		Token *ttmp = tmp->next;
+		if(tmp->token == T_COMMA && exprList(&ttmp, &tr)){
+			tmp = ttmp;
+			ramp = allocAST();
+			*ramp = tr;
+		}
+		
+		lamp = allocAST();
+		*lamp = tl;
+
+		*ast = (AST){
+			A_EXPRLIST,
+			.left = lamp,
+			.right = ramp
+		};
+
+		*tok = tmp;
+		return 1;
+	}
+
+	return 0;
+}
+
 // iso c99 70
 static int
 argumentExprList(Token **tok, AST *ast)
 {
-	//TODO
-	return 0;
+	return exprList(tok, ast);
 }
 
 // iso c99 69
@@ -189,31 +221,41 @@ postfixExpr(Token **tok, AST *ast)
 			}
 
 			ttmp = tmp->next;
-			if(tmp->token == T_LBRACE && expr(&ttmp, &tr) && ttmp->token == T_RBRACE){
-				tmp = ttmp->next;
-				ramp = allocAST();
-				*ramp = tr;
+			if(tmp->token == T_LBRACE && expr(&ttmp, &tr)){
+				if(ttmp->token == T_RBRACE){
+					tmp = ttmp->next;
+					ramp = allocAST();
+					*ramp = tr;
 
-				tl = (AST){
-					A_DEREF,
-					.left = tl.left,
-					.right = ramp
-				};
-				continue;
+					tl = (AST){
+						A_DEREF,
+						.left = tl.left,
+						.right = ramp
+					};
+					continue;
+				}
+				freeAST(tr.left);
+				freeAST(tr.right);
 			}
 			
 			ttmp = tmp->next;
-			if(tmp->token == T_LPAREN && argumentExprList(&tmp, &tr) && ttmp->token == T_RPAREN){
-				tmp = ttmp->next;
-				ramp = allocAST();
-				*ramp = tr;
+			if(tmp->token == T_LPAREN){
+			       	if(!argumentExprList(&ttmp, &tr))
+					tr = (AST){.left = NULL, .right = NULL};
+				if(ttmp->token == T_RPAREN){
+					tmp = ttmp->next;
+					ramp = allocAST();
+					*ramp = tr;
 
-				tl = (AST){
-					A_CALL,
-					.left = tl.left,
-					.right = ramp
-				};
-				continue;
+					tl = (AST){
+						A_CALL,
+						.left = tl.left,
+						.right = ramp
+					};
+					continue;
+				}
+				freeAST(tr.left);
+				freeAST(tr.right);
 			}
 
 			type = -1;
@@ -594,7 +636,7 @@ assignmentExpr(Token **tok, AST *ast)
 static int
 expr(Token **tok, AST *ast)
 {
-	return assignmentExpr(tok, ast) || elvisExpr(tok, ast);
+	return exprList(tok, ast);
 }
 
 static const char* astName[] = {
@@ -619,7 +661,8 @@ static const char* astName[] = {
 	"A_BOR",
 
 	"A_ELVIS",
-	"A_CALL"
+	"A_CALL",
+	"A_EXPRLIST"
 };
 
 void
