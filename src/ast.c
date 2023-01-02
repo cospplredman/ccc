@@ -276,27 +276,19 @@ castExpr(Token **tok, AST *ast){
 static int
 unaryExpr(Token **tok, AST *ast)
 {
-	AST *lamp = allocAST();
-	Token *tmp = (*tok)->next;
-	switch((*tok)->token){
-		case T_INC:
-			if(unaryExpr(&tmp, lamp)){
-				*tok = tmp;
-				ast->left = lamp;
-				ast->right = NULL;
-				ast->type = A_INC;
-				return 1;
-			}
-			break;
-		case T_DEC:
-			if(unaryExpr(&tmp, lamp)){
-				*tok = tmp;
-				ast->left = lamp;
-				ast->right = NULL;
-				ast->type = A_DEC;
-				return 1;
-			}
-			break;
+	AST tl;
+	Token *tmp = *tok;
+	int type = -1;
+
+	switch(tmp->token){
+		case T_INC: type = A_INC; break;
+		case T_DEC: type = A_DEC; break;
+		case T_AND: type = A_ADDR; break;
+		case T_STAR: type = A_UDEREF; break;
+		case T_PLUS: type = A_UADD; break;
+		case T_MINUS: type = A_USUB; break;
+		case T_TILDE: type = A_NEG; break;
+		case T_BANG: type = A_BNEG; break;
 		/*
 		case T_SIZEOF:
 			if(unaryExpr(&tmp, lamp)){
@@ -311,63 +303,23 @@ unaryExpr(Token **tok, AST *ast)
 			}
 			break;
 		*/
-		case T_AND:
-			if(castExpr(&tmp, lamp)){
-				*tok = tmp;
-				ast->left = lamp;
-				ast->right = NULL;
-				ast->type = A_ADDR;
-				return 1;
-			}
-			break;
-		case T_STAR:
-			if(castExpr(&tmp, lamp)){
-				*tok = tmp;
-				ast->left = lamp;
-				ast->right = NULL;
-				ast->type = A_UDEREF;
-				return 1;
-			}
-			break;
-		case T_PLUS:
-			if(castExpr(&tmp, lamp)){
-				*tok = tmp;
-				ast->left = lamp;
-				ast->right = NULL;
-				ast->type = A_UADD;
-				return 1;
-			}
-			break;
-		case T_MINUS:
-			if(castExpr(&tmp, lamp)){
-				*tok = tmp;
-				ast->left = lamp;
-				ast->right = NULL;
-				ast->type = A_USUB;
-				return 1;
-			}
-			break;
-		case T_TILDE:
-			if(castExpr(&tmp, lamp)){
-				*tok = tmp;
-				ast->left = lamp;
-				ast->right = NULL;
-				ast->type = A_NEG;
-				return 1;
-			}
-			break;
-		case T_BANG:
-			if(castExpr(&tmp, lamp)){
-				*tok = tmp;
-				ast->left = lamp;
-				ast->right = NULL;
-				ast->type = A_BNEG;
-				return 1;
-			}
-			break;
 	}
 
-	freeAST(lamp);
+	tmp = tmp->next;
+	if(type >= 0 && castExpr(&tmp, &tl)){
+		AST *lamp = allocAST();
+		*lamp = tl;
+
+		*ast = (AST){
+			type,
+			.left = lamp,
+			.right = NULL
+		};
+
+		*tok = tmp;
+		return 1;
+	}
+
 	return postfixExpr(tok, ast);
 }
 
