@@ -372,31 +372,32 @@ unaryExpr(Token **tok, AST *ast)
 }
 
 static int
-Expr(int (*prev)(Token**, AST*), int (*oper)(int), Token **tok, AST *ast)
+binExpr(int (*prev)(Token**, AST*), int (*oper)(int), Token **tok, AST *ast)
 {
-	AST tl, tr, *lamp = &tl, *ramp = &tr;
+	AST tl, tr;
 	Token *tmp = *tok;
 	int type;
 
-	if(prev(&tmp, lamp)){
-		type = oper(tmp->token);
-
-		if(type < 0 || !prev(&tmp->next, ramp)){
-			*ast = tl;
-		}else{
-			lamp = allocAST();
-			ramp = allocAST();
+	if(prev(&tmp, &tl)){
+		while(1){
+			type = oper(tmp->token);
+			if(type < 0 || !prev(&tmp->next, &tr))
+				break;
 			tmp = tmp->next;
+
+			AST *lamp = allocAST(),
+			    *ramp = allocAST();
 			*lamp = tl;
 			*ramp = tr;
 			
-			*ast = (AST){
+			tl = (AST){
 				type,
 				.left = lamp,
 				.right = ramp
 			};
-		}
-		
+		};
+
+		*ast = tl;
 		*tok = tmp;
 		return 1;
 	}
@@ -421,7 +422,7 @@ mulOper(int token)
 static int
 mulExpr(Token **tok, AST *ast)
 {
-	return Expr(castExpr, mulOper, tok, ast);
+	return binExpr(castExpr, mulOper, tok, ast);
 }
 
 static int
@@ -440,7 +441,7 @@ addOper(int token)
 static int
 addExpr(Token **tok, AST *ast)
 {
-	return Expr(mulExpr, addOper, tok, ast);
+	return binExpr(mulExpr, addOper, tok, ast);
 }
 
 static int
@@ -459,7 +460,7 @@ shiftOper(int token)
 static int
 shiftExpr(Token **tok, AST *ast)
 {
-	return Expr(addExpr, shiftOper, tok, ast);
+	return binExpr(addExpr, shiftOper, tok, ast);
 }
 
 static int
@@ -479,7 +480,7 @@ relOper(int token)
 static int
 relExpr(Token **tok, AST *ast)
 {
-	return Expr(shiftExpr, relOper, tok, ast);
+	return binExpr(shiftExpr, relOper, tok, ast);
 }
 
 static int
@@ -497,7 +498,7 @@ eqOper(int token)
 static int
 eqExpr(Token **tok, AST *ast)
 {
-	return Expr(relExpr, eqOper, tok, ast);
+	return binExpr(relExpr, eqOper, tok, ast);
 }
 
 static int
@@ -514,7 +515,7 @@ andOper(int token)
 static int
 andExpr(Token **tok, AST *ast)
 {
-	return Expr(eqExpr, andOper, tok, ast);
+	return binExpr(eqExpr, andOper, tok, ast);
 }
 
 static int
@@ -531,7 +532,7 @@ xorOper(int token)
 static int
 xorExpr(Token **tok, AST *ast)
 {
-	return Expr(andExpr, xorOper, tok, ast);
+	return binExpr(andExpr, xorOper, tok, ast);
 }
 
 static int
@@ -548,7 +549,7 @@ orOper(int token)
 static int
 orExpr(Token **tok, AST *ast)
 {
-	return Expr(xorExpr, orOper, tok, ast);
+	return binExpr(xorExpr, orOper, tok, ast);
 }
 
 
@@ -567,7 +568,7 @@ bandOper(int token)
 static int
 bandExpr(Token **tok, AST *ast)
 {
-	return Expr(orExpr, bandOper, tok, ast);
+	return binExpr(orExpr, bandOper, tok, ast);
 }
 
 static int
@@ -585,7 +586,7 @@ borOper(int token)
 static int 
 borExpr(Token **tok, AST *ast)
 {
-	return Expr(bandExpr, borOper, tok, ast);
+	return binExpr(bandExpr, borOper, tok, ast);
 }
 
 // iso c99 90
