@@ -717,6 +717,255 @@ expr(Token **tok, AST *ast)
 	return exprList(tok, ast);
 }
 
+// iso c99 97
+static int
+declarator(Token **tok, AST *ast)
+{
+	//TODO A_DECLARATOR
+	return 0;
+}
+
+// iso c99 97
+static int
+initializer(Token **tok, AST *ast)
+{
+	//TODO A_INITIALIZER
+	return 0;
+}
+
+// iso c99 97
+static int
+initDeclarator(Token **tok, AST *ast)
+{
+	AST tl, tr;
+	AST *lamp, *ramp;
+	Token *tmp = *tok;
+	if(declarator(&tmp, &tl)){
+		if(tmp->token == T_EQUALS){
+			tmp = tmp->next;
+			if(initializer(&tmp, &tr)){
+				lamp = allocAST();
+				ramp = allocAST();
+				*lamp = tl;
+				*ramp = tr;
+				
+				*ast = (AST){
+					A_INITIALIZER,
+					.left = lamp,
+					.right = ramp
+				};
+
+				*tok = tmp;
+				return 1;
+			}
+		}
+
+		*ast = tl;
+		*tok = tmp;
+		return 1;
+	}
+
+	return 0;
+}
+
+// iso c99 97
+static int
+initDeclaratorList(Token **tok, AST *ast)
+{
+	AST tl, tr;
+	AST *lamp, *ramp = NULL;
+	Token *tmp = *tok;
+	
+	if(initDeclarator(&tmp, &tl)){
+		Token *ttmp = tmp->next;
+		
+		if(tmp->token == T_COMMA && initDeclarator(&ttmp, &tr)){
+			lamp = allocAST();
+			ramp = allocAST();
+			*lamp = tl;
+			*ramp = tr;
+			
+			*ast = (AST){
+				A_DECLLIST,
+				.left = lamp,
+				.right = ramp
+			};
+
+			*tok = ttmp;
+			return 1;
+		}
+		
+		*ast = tl;
+		*tok = tmp;
+		return 1;
+	}
+
+	return 0;
+}
+
+// iso c99 98
+static int
+storageClassSpecifier(Token **tok, AST *ast)
+{
+	Token *tmp = *tok;
+	
+	switch(tmp->token){
+		case T_TYPEDEF:
+		case T_EXTERN:
+		case T_STATIC:
+		case T_AUTO:
+		case T_REGISTER:
+			*ast = (AST){
+				A_STORAGESPEC,
+				.intValue = tmp->token
+			};
+			tmp = tmp->next;
+			*tok = tmp;
+			return 1;
+	}
+
+	return 0;
+}
+
+// iso c99 101
+static int
+structOrUnionSpecifier(Token **tok, AST *ast)
+{
+	//TODO
+	return 0;
+}
+
+// iso c99 99
+static int
+enumSpecifier(Token **tok, AST *ast)
+{
+	//TODO
+	return 0;
+}
+
+// iso c99 99
+static int
+typedefName(Token **tok, AST *ast){
+	//TODO
+	return 0;
+}
+
+// iso c99 99
+static int
+typeSpecifier(Token **tok, AST *ast)
+{
+	Token *tmp = *tok;
+
+	switch(tmp->token){
+		case T_VOID:
+		case T_CHAR:
+		case T_SHORT:
+		case T_INT:
+		case T_LONG:
+		case T_FLOAT:
+		case T_DOUBLE:
+		case T_SIGNED:
+		case T_UNSIGNED:
+		case T_BOOL:
+		case T_COMPLEX:
+		case T_IMAGINARY:
+			*ast = (AST){
+				A_TYPESPEC,
+				.intValue = tmp->token
+			};
+			tmp = tmp->next;
+			*tok = tmp;	
+			return 1;
+	}
+
+	return structOrUnionSpecifier(tok, ast) || enumSpecifier(tok, ast) || typedefName(tok, ast);
+}
+
+// iso c99 97
+static int
+typeQualifier(Token **tok, AST *ast)
+{
+	//TODO A_TYPEQUAL
+	return 0;
+}
+
+// iso c99 97
+static int
+functionSpecifier(Token **tok, AST *ast)
+{
+	//TODO A_FUNCSPEC
+	return 0;
+}
+
+// iso c99 97
+static int
+declarationSpecifiers(Token **tok, AST *ast)
+{
+	AST tl, tr;
+	AST *lamp, *ramp;
+	Token *tmp = *tok;
+
+	if(   storageClassSpecifier(&tmp, &tl) || typeSpecifier(&tmp, &tl) 
+	   || typeQualifier(&tmp, &tl) || functionSpecifier(&tmp, &tl)     ){
+		if(declarationSpecifiers(&tmp, &tr)){
+			lamp = allocAST();
+			ramp = allocAST();
+			*lamp = tl;
+			*ramp = tr;
+			
+			*ast = (AST){
+				A_DECLSPECLIST,
+				.left = lamp,
+				.right = ramp
+			};
+
+			*tok = tmp;
+			return 1;
+		}
+
+		*ast = tl;
+		*tok = tmp;
+		return 1;
+	}
+	return 0;
+}
+
+// iso c99 97
+static int
+declaration(Token **tok, AST *ast)
+{
+	AST tl, tr;
+	AST *lamp, *ramp = NULL;
+	Token *tmp = *tok;
+
+	if(declarationSpecifiers(&tmp, &tl)){
+		int res = initDeclaratorList(&tmp, &tr);
+		if(tmp->token == T_SEMI){
+			tmp = tmp->next;
+			if(res){
+				ramp = allocAST();
+				*ramp = tr;
+			}
+			lamp = allocAST();
+			*lamp = tl;
+	
+			*ast = (AST){
+				A_DECLARATION,
+				.left = lamp,
+				.right = ramp
+			};
+
+			*tok = tmp;
+			return 1;
+		}
+		if(res)
+			freeASTLeaves(&tr);
+		freeASTLeaves(&tl);
+	}
+	return 0;
+
+}
+
 static const char* astName[] = {
 	"A_IDENT", "A_INTLIT", "A_STRLIT",
 
@@ -742,7 +991,9 @@ static const char* astName[] = {
 	"A_CALL",
 	"A_EXPRLIST",
 	"A_EQ", "A_MULEQ", "A_DIVEQ", "A_MODEQ", "A_ADDEQ", "A_SUBEQ", "A_LSHIFTEQ", "A_RSHIFTEQ", "A_ANDEQ", "A_XOREQ", "A_OREQ",
-	"A_COND", "A_CONDRES"
+	"A_COND", "A_CONDRES",
+	"A_DECLARATION", "A_DECLSPEC", "A_DECLSPECLIST", "A_DECLLIST", "A_DECLARATOR", "A_INITIALIZER"
+	"A_STORAGESPEC", "A_TYPESPEC", "A_TYPEQUAL", "A_FUNCSPEC"
 };
 
 void
@@ -774,7 +1025,8 @@ AST*
 genAST(Token **tok)
 {
 	AST *ast = allocAST();
-	if(expr(tok, ast))
+	//if(expr(tok, ast))
+	if(declaration(tok, ast))
 		return ast;
 	freeAST(ast);
 	return NULL;
