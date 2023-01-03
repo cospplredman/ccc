@@ -702,15 +702,12 @@ printTokens(Token *tok)
 Token*
 allocToken()
 {
-	Token *q = (Token*)malloc(sizeof(Token));
-	printf("allocToken %p\n", q);
-	return q;
+	return (Token*)malloc(sizeof(Token));
 }
 
 void
 freeToken(Token *tok)
 {
-	printf("freeToken %p\n", tok);
 	if(tok->next)
 		freeToken(tok->next);
 	free(tok);
