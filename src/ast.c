@@ -602,37 +602,51 @@ borExpr(Token **tok, AST *ast)
 static int
 elvisExpr(Token **tok, AST *ast)
 {
-	AST *lamp = allocAST();
-	AST *ramp = allocAST();
+	AST tl, tm, tr;
+	AST *lamp, *mamp, *ramp;
 	Token *tmp = *tok;
 
-	if(borExpr(&tmp, lamp)){
-		/*
-		//TODO
-		switch(tmp->token){
-			case T_BAND:
-				tmp = tmp->next;
-				if(borExpr(&tmp, ramp)){
-					*tok = tmp;
-					ast->left = lamp;
-					ast->right = ramp;
-					ast->type = A_BAND;
+	if(borExpr(&tmp, &tl)){
+		Token *ttmp = tmp;
+		if(ttmp->token == T_QMARK){
+			ttmp = ttmp->next;
+			if(expr(&ttmp, &tm) && ttmp->token == T_COLON){
+				ttmp = ttmp->next;
+				if(elvisExpr(&ttmp, &tr)){
+					lamp = allocAST();
+					mamp = allocAST();
+					ramp = allocAST();
+					*mamp = tm;
+					*ramp = tr;
+
+					*lamp = (AST){
+						A_CONDRES,
+						.left = mamp,
+						.right = ramp
+					};
+
+					ramp = allocAST();
+					*ramp = tl;
+
+					*ast = (AST){
+						A_COND,
+						.left = ramp,
+						.right = lamp
+					};
+
+					*tok = ttmp;
 					return 1;
 				}
-			break;
+				freeASTLeaves(&tm);
+			}
+
 		}
-		*/
+
 		*tok = tmp;
-		*ast = *lamp;
-		lamp->left = lamp->right = NULL;
-		freeAST(lamp);
-		freeAST(ramp);
+		*ast = tl;
 		return 1;
 	}
 	
-	freeAST(lamp);
-	freeAST(ramp);
-
 	return 0;
 }
 
@@ -725,7 +739,8 @@ static const char* astName[] = {
 	"A_ELVIS",
 	"A_CALL",
 	"A_EXPRLIST",
-	"A_EQ", "A_MULEQ", "A_DIVEQ", "A_MODEQ", "A_ADDEQ", "A_SUBEQ", "A_LSHIFTEQ", "A_RSHIFTEQ", "A_ANDEQ", "A_XOREQ", "A_OREQ"
+	"A_EQ", "A_MULEQ", "A_DIVEQ", "A_MODEQ", "A_ADDEQ", "A_SUBEQ", "A_LSHIFTEQ", "A_RSHIFTEQ", "A_ANDEQ", "A_XOREQ", "A_OREQ",
+	"A_COND", "A_CONDRES"
 };
 
 void
