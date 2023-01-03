@@ -166,21 +166,24 @@ exprList(Token **tok, AST *ast)
 	
 	if(assignmentExpr(&tmp, &tl)){
 		Token *ttmp = tmp->next;
+		
 		if(tmp->token == T_COMMA && exprList(&ttmp, &tr)){
-			tmp = ttmp;
+			lamp = allocAST();
 			ramp = allocAST();
+			*lamp = tl;
 			*ramp = tr;
+			
+			*ast = (AST){
+				A_EXPRLIST,
+				.left = lamp,
+				.right = ramp
+			};
+
+			*tok = ttmp;
+			return 1;
 		}
 		
-		lamp = allocAST();
-		*lamp = tl;
-
-		*ast = (AST){
-			A_EXPRLIST,
-			.left = lamp,
-			.right = ramp
-		};
-
+		*ast = tl;
 		*tok = tmp;
 		return 1;
 	}
