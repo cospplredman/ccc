@@ -710,8 +710,7 @@ assignmentExpr(Token **tok, AST *ast)
 	return 0;
 }
 
-//TODO
-// iso c99 ?? 
+// iso c99 94 
 static int
 expr(Token **tok, AST *ast)
 {
