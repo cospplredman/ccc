@@ -5,7 +5,7 @@
 
 #define ISDIGIT(a) ((a) >= '0' && (a) <= '9')
 #define ISOCT(a)   ((a) >= '0' && (a) <= '7')
-#define ISHEX(a)   ((a) >= '0' && (a) <= '9' || ((a) | 32) >= 'a' && ((a) | 32) <= 'f')
+#define ISHEX(a)   (((a) >= '0' && (a) <= '9') || (((a) | 32) >= 'a' && ((a) | 32) <= 'f'))
 #define HEXVAL(b)  (ISDIGIT(b) ? ((b) - '0') : (((b) | 32) - 'a' + 10))
 #define ISALPHA(a) (((a) | 32) >= 'a' && ((a) | 32) <= 'z')
 
@@ -503,7 +503,7 @@ ppExtra(char **str, Token *tok)
 		*str + 1
 	};
 
-	*str++;
+	(*str)++;
 	return 1;
 }
 
@@ -688,7 +688,7 @@ static const char *tokenName[] = {
 void
 printToken(Token *tok)
 {
-	printf("%-15s: %d %lf \"%.*s\"\n", tokenName[tok->token], tok->intValue, tok->floatValue, tok->end - tok->start, tok->start);
+	printf("%-15s: %lld %lf \"%.*s\"\n", tokenName[tok->token], tok->intValue, tok->floatValue, (int)(tok->end - tok->start), tok->start);
 }
 
 void
