@@ -25,8 +25,8 @@ getTablePtr(HashTable *table, void *val, size_t hash, int (*cmpfn)(void*, void*)
 	size_t retry = 0;
 	do{
 		size_t index = ((hash + retry) % table->size) * table->itemsz;
-		if(cmpfn(val, table->val + index))
-			return table->val + index;
+		if(cmpfn(val, (char*)table->val + index))
+			return (void**)((char*)table->val + index);
 		retry++;
 	}while(retry < table->size);
 	return NULL;
