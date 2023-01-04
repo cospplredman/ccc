@@ -155,14 +155,15 @@ printAST(AST *ast)
 static int
 identifier(Token **tok, AST *ast)
 {
-	if((*tok)->token == T_IDENTIFIER){
+	Token *tmp = *tok;
+	if(scanToken(&tmp, T_IDENTIFIER)){
 		*ast = (AST){
 			A_IDENT,
 			.start = (*tok)->start,
 			.end = (*tok)->end
 		};
 
-		*tok = (*tok)->next;
+		*tok = tmp;
 		return 1;
 	}
 		
@@ -193,7 +194,8 @@ constant(Token **tok, AST *ast)
 static int
 stringLit(Token **tok, AST *ast)
 {
-	if((*tok)->token == T_STRINGLIT){
+	Token *tmp = *tok;
+	if(scanToken(&tmp, T_STRINGLIT)){
 		//TODO do escape sequences and whatnot (alredy implimented just need to make a string)
 		*ast = (AST){
 			A_STRLIT,
@@ -201,7 +203,7 @@ stringLit(Token **tok, AST *ast)
 			.end = (*tok)->end,
 		};
 
-		*tok = (*tok)->next;
+		*tok = tmp;
 		return 1;
 	}
 
@@ -217,12 +219,16 @@ primaryExpr(Token **tok, AST *ast)
 	if(identifier(tok, ast) || constant(tok, ast) || stringLit(tok, ast))
 		return 1;
 
-	if((*tok)->token == T_LPAREN){
-		Token *tmp = (*tok)->next;
-		if(expr(&tmp, ast) && tmp->token == T_RPAREN){
-			*tok = tmp->next;
+	Token *tmp = *tok;
+	AST tl;
+	if(scanToken(&tmp, T_LPAREN)){
+		if(expr(&tmp, &tl) && scanToken(&tmp, T_RPAREN)){
+			*ast = tl;
+			*tok = tmp;
 			return 1;
 		}
+
+		freeASTLeaves(&tl);
 	}
 
 	return 0;
@@ -270,24 +276,16 @@ static int
 exprList(Token **tok, AST *ast)
 {
 	AST tl, tr;
-	AST *lamp, *ramp = NULL;
 	Token *tmp = *tok;
 	
 	if(assignmentExpr(&tmp, &tl)){
-		Token *ttmp = tmp->next;
-		
-		if(tmp->token == T_COMMA && exprList(&ttmp, &tr)){
-			lamp = allocAST();
-			ramp = allocAST();
-			*lamp = tl;
-			*ramp = tr;
-			
+		Token *ttmp = tmp;
+		if(scanToken(&ttmp, T_COMMA) && exprList(&ttmp, &tr)){
 			*ast = (AST){
 				A_EXPRLIST,
-				.left = lamp,
-				.right = ramp
+				.left = copyAST(tl),
+				.right = copyAST(tr)
 			};
-
 			*tok = ttmp;
 			return 1;
 		}
@@ -316,72 +314,59 @@ postfixExpr(Token **tok, AST *ast)
 	}
 
 	AST tl, tr;
-	AST *lamp, *ramp;
-	Token *tmp = *tok;
+	Token *tmp = *tok, *ttmp;
 	int type = -1;
 	
 	if(primaryExpr(&tmp, &tl)){
 		while(1){
-			Token *ttmp = tmp;
-			lamp = allocAST();
-			*lamp = tl;
-			tl.left = lamp;
+			tl.left = copyAST(tl);
+			tl.right = NULL;
 
-			type = -1;
-			switch(tmp->token){
-				case T_DOT: type = A_MEMBER; break;
-				case T_ARROW: type = A_ARROW; break;
-			}
-
-			ttmp = tmp->next;
-			if(type >= 0 && identifier(&ttmp, &tr)){
-				tmp = ttmp;
-				ramp = allocAST();
-				*ramp = tr;
-
-				tl = (AST){
-					type,
-					.left = tl.left,
-					.right = ramp
-				};
-				continue;
-			}
-
-			ttmp = tmp->next;
-			if(tmp->token == T_LBRACE && expr(&ttmp, &tr)){
-				if(ttmp->token == T_RBRACE){
-					tmp = ttmp->next;
-					ramp = allocAST();
-					*ramp = tr;
-
+			ttmp = tmp;
+			if(scanToken(&ttmp, T_LBRACE) && expr(&ttmp, &tr)){
+				if(scanToken(&ttmp, T_RBRACE)){
 					tl = (AST){
 						A_DEREF,
 						.left = tl.left,
-						.right = ramp
+						.right = copyAST(tr)
 					};
+					tmp = ttmp;
 					continue;
 				}
 				freeASTLeaves(&tr);
 			}
 			
-			ttmp = tmp->next;
-			if(tmp->token == T_LPAREN){
-			       	if(!argumentExprList(&ttmp, &tr))
-					tr = (AST){.left = NULL, .right = NULL};
-				if(ttmp->token == T_RPAREN){
-				freeAST(tr.right);
-					tmp = ttmp->next;
-					ramp = allocAST();
-					*ramp = tr;
-
+			ttmp = tmp;
+			if(scanToken(&ttmp, T_LPAREN)){
+			       	int opt = argumentExprList(&ttmp, &tr);
+				if(scanToken(&ttmp, T_RPAREN)){
 					tl = (AST){
 						A_CALL,
 						.left = tl.left,
-						.right = ramp
+						.right = opt ? copyAST(tr) : NULL
 					};
+					tmp = ttmp;
 					continue;
 				}
-				freeASTLeaves(&tr);
+				if(opt)
+					freeASTLeaves(&tr);
+			}
+			
+			type = -1;
+			switch(tmp->token){
+				case T_DOT: type = A_MEMBER; break;
+				case T_ARROW: type = A_ARROW; break;
+			}
+			ttmp = tmp->next;
+
+			if(type >= 0 && identifier(&ttmp, &tr)){
+				tl = (AST){
+					type,
+					.left = tl.left,
+					.right = copyAST(tr)
+				};
+				tmp = ttmp;
+				continue;
 			}
 
 			type = -1;
@@ -389,6 +374,7 @@ postfixExpr(Token **tok, AST *ast)
 				case T_INC: type = A_PINC; break;
 				case T_DEC: type = A_PDEC; break;
 			}
+			ttmp = tmp->next;
 
 			if(type < 0)
 				break;
@@ -398,15 +384,13 @@ postfixExpr(Token **tok, AST *ast)
 				.left = tl.left,
 				.right = NULL
 			};
-				
+			tmp = ttmp;
 		}
 
+		*ast = *tl.left;
+		tl.left->left = tl.left->right = NULL;
+		freeAST(tl.left);
 		*tok = tmp;
-		lamp = tl.left;
-		
-		*ast = *lamp;
-		lamp->left = lamp->right = NULL;
-		freeAST(lamp);
 		return 1;
 	}
 
@@ -450,12 +434,9 @@ unaryExpr(Token **tok, AST *ast)
 
 	tmp = tmp->next;
 	if(type >= 0 && castExpr(&tmp, &tl)){
-		AST *lamp = allocAST();
-		*lamp = tl;
-
 		*ast = (AST){
 			type,
-			.left = lamp,
+			.left = copyAST(tl),
 			.right = NULL
 		};
 
@@ -469,61 +450,23 @@ unaryExpr(Token **tok, AST *ast)
 // iso c99 78
 static int
 castExpr(Token **tok, AST *ast){
-	// todo
-	if((*tok)->token == T_LPAREN){
-		Token *tmp = (*tok)->next;
-		AST *lamp = allocAST();
-		AST *ramp = allocAST();
-		if(typeName(&tmp, lamp)){
-			if(tmp->token == T_RPAREN){
-				tmp = tmp->next;
-				if(castExpr(&tmp, ramp)){
-					*tok = tmp;
-					ast->left = lamp;
-					ast->right = ramp;
-					ast->type = A_CAST;
-					return 1;
-				}
-			}
-		}	
-		freeAST(lamp);
-		freeAST(ramp);
-	}
-	return unaryExpr(tok, ast);
-}
-
-static int
-binExpr(int (*prev)(Token**, AST*), int (*oper)(int), Token **tok, AST *ast)
-{
 	AST tl, tr;
 	Token *tmp = *tok;
-	int type;
 
-	if(prev(&tmp, &tl)){
-		while(1){
-			type = oper(tmp->token);
-			if(type < 0 || !prev(&tmp->next, &tr))
-				break;
-			tmp = tmp->next;
-
-			AST *lamp = allocAST(),
-			    *ramp = allocAST();
-			*lamp = tl;
-			*ramp = tr;
-			
-			tl = (AST){
-				type,
-				.left = lamp,
-				.right = ramp
+	if(scanToken(&tmp, T_LPAREN) && typeName(&tmp, &tl)){
+		if(scanToken(&tmp, T_RPAREN) && castExpr(&tmp, &tr)){
+			*ast = (AST){
+				A_CAST,
+				.left = copyAST(tl),
+				.right = copyAST(tr)
 			};
-		};
+			*tok = tmp;
+			return 1;
+		}
+		freeASTLeaves(&tl);
+	}	
 
-		*ast = tl;
-		*tok = tmp;
-		return 1;
-	}
-	
-	return 0;
+	return unaryExpr(tok, ast);
 }
 
 static int
@@ -715,43 +658,26 @@ static int
 elvisExpr(Token **tok, AST *ast)
 {
 	AST tl, tm, tr;
-	AST *lamp, *mamp, *ramp;
 	Token *tmp = *tok;
 
 	if(borExpr(&tmp, &tl)){
 		Token *ttmp = tmp;
-		if(ttmp->token == T_QMARK){
-			ttmp = ttmp->next;
-			if(expr(&ttmp, &tm) && ttmp->token == T_COLON){
-				ttmp = ttmp->next;
-				if(elvisExpr(&ttmp, &tr)){
-					lamp = allocAST();
-					mamp = allocAST();
-					ramp = allocAST();
-					*mamp = tm;
-					*ramp = tr;
-
-					*lamp = (AST){
+		if(scanToken(&ttmp, T_QMARK) && expr(&ttmp, &tm) ){
+			if(scanToken(&ttmp, T_COLON) && elvisExpr(&ttmp, &tr)){
+				*ast = (AST){
+					A_COND,
+					.left = copyAST(tl),
+					.right = copyAST((AST){
 						A_CONDRES,
-						.left = mamp,
-						.right = ramp
-					};
+						.left = copyAST(tm),
+						.right = copyAST(tr)
+					})
+				};
 
-					ramp = allocAST();
-					*ramp = tl;
-
-					*ast = (AST){
-						A_COND,
-						.left = ramp,
-						.right = lamp
-					};
-
-					*tok = ttmp;
-					return 1;
-				}
-				freeASTLeaves(&tm);
+				*tok = ttmp;
+				return 1;
 			}
-
+			freeASTLeaves(&tm);
 		}
 
 		*tok = tmp;
@@ -787,23 +713,18 @@ static int
 assignmentExpr(Token **tok, AST *ast)
 {
 	AST tl, tr;
-	AST *lamp, *ramp;
 	Token *tmp = *tok;
 	int type;
 
 	if(unaryExpr(&tmp, &tl)){
 		type = assignmentOper(tmp->token);
 		tmp = tmp->next;
-		if(type >= 0 && assignmentExpr(&tmp, &tr)){
-			lamp = allocAST();
-			ramp = allocAST();
-			*lamp = tl;
-			*ramp = tr;
 
+		if(type >= 0 && assignmentExpr(&tmp, &tr)){
 			*ast = (AST){
 				type,
-				.left = lamp,
-				.right = ramp
+				.left = copyAST(tl),
+				.right = copyAST(tr)
 			};
 
 			*tok = tmp;
@@ -847,26 +768,18 @@ static int
 initDeclarator(Token **tok, AST *ast)
 {
 	AST tl, tr;
-	AST *lamp, *ramp;
 	Token *tmp = *tok;
 	if(declarator(&tmp, &tl)){
-		if(tmp->token == T_EQUALS){
-			tmp = tmp->next;
-			if(initializer(&tmp, &tr)){
-				lamp = allocAST();
-				ramp = allocAST();
-				*lamp = tl;
-				*ramp = tr;
-				
-				*ast = (AST){
-					A_INITIALIZER,
-					.left = lamp,
-					.right = ramp
-				};
+		Token *ttmp = tmp;
+		if(scanToken(&ttmp, T_EQUALS) && initializer(&ttmp, &tr)){
+			*ast = (AST){
+				A_INITIALIZER,
+				.left = copyAST(tl),
+				.right = copyAST(tr)
+			};
 
-				*tok = tmp;
-				return 1;
-			}
+			*tok = ttmp;
+			return 1;
 		}
 
 		*ast = tl;
@@ -882,22 +795,15 @@ static int
 initDeclaratorList(Token **tok, AST *ast)
 {
 	AST tl, tr;
-	AST *lamp, *ramp = NULL;
 	Token *tmp = *tok;
 	
 	if(initDeclarator(&tmp, &tl)){
-		Token *ttmp = tmp->next;
-		
-		if(tmp->token == T_COMMA && initDeclarator(&ttmp, &tr)){
-			lamp = allocAST();
-			ramp = allocAST();
-			*lamp = tl;
-			*ramp = tr;
-			
+		Token *ttmp = tmp;
+		if(scanToken(&ttmp, T_COMMA) && initDeclarator(&ttmp, &tr)){
 			*ast = (AST){
 				A_DECLLIST,
-				.left = lamp,
-				.right = ramp
+				.left = copyAST(tl),
+				.right = copyAST(tr)
 			};
 
 			*tok = ttmp;
@@ -938,9 +844,49 @@ storageClassSpecifier(Token **tok, AST *ast)
 
 // iso c99 101
 static int
-structOrUnionSpecifier(Token **tok, AST *ast)
+structDeclarationList(Token **tok, AST *ast)
 {
 	//TODO
+	return 0;
+}
+
+// iso c99 101
+static int
+structOrUnionSpecifier(Token **tok, AST *ast)
+{
+	AST tl, tr;
+	Token *tmp = *tok;
+	int idflag = 0;
+	int type = A_STRUCT;
+
+	if(scanToken(&tmp, T_STRUCT) || scanToken(&tmp, T_UNION) ? (type = A_UNION, 1) : 0){
+		idflag = identifier(&tmp, &tl);
+
+		Token *ttmp = tmp;
+		if(scanToken(&ttmp, T_LCURLY)){
+			if(structDeclarationList(&ttmp, &tr) && scanToken(&ttmp,  T_RCURLY)){
+				*ast = (AST){
+					type,
+					.left = idflag ? copyAST(tl) : NULL,
+					.right = copyAST(tr)
+				};
+				*tok = ttmp;
+				return 1;
+			}
+			freeASTLeaves(&tr);
+		}
+
+		if(idflag){
+			*ast = (AST){
+				type,
+				.left = copyAST(tl),
+				.right = NULL
+			};
+
+			*tok = tmp;
+			return 1;
+		}
+	}
 	return 0;
 }
 
@@ -1011,21 +957,17 @@ static int
 declarationSpecifiers(Token **tok, AST *ast)
 {
 	AST tl, tr;
-	AST *lamp, *ramp;
 	Token *tmp = *tok;
 
-	if(   storageClassSpecifier(&tmp, &tl) || typeSpecifier(&tmp, &tl) 
-	   || typeQualifier(&tmp, &tl) || functionSpecifier(&tmp, &tl)     ){
+	if(   storageClassSpecifier(&tmp, &tl) 
+	   || typeSpecifier(&tmp, &tl) 
+	   || typeQualifier(&tmp, &tl)
+	   || functionSpecifier(&tmp, &tl) ){
 		if(declarationSpecifiers(&tmp, &tr)){
-			lamp = allocAST();
-			ramp = allocAST();
-			*lamp = tl;
-			*ramp = tr;
-			
 			*ast = (AST){
 				A_DECLSPECLIST,
-				.left = lamp,
-				.right = ramp
+				.left = copyAST(tl),
+				.right = copyAST(tr)
 			};
 
 			*tok = tmp;
@@ -1075,67 +1017,14 @@ declaration(Token **tok, AST *ast)
 
 }
 
-static const char* astName[] = {
-	"A_IDENT", "A_INTLIT", "A_STRLIT",
 
-	"A_MEMBER", "A_ARROW", "A_PINC", "A_PDEC", "A_INC", "A_DEC", "A_SIZEOF",
-	"A_ADDR", "A_UDEREF", "A_DEREF", "A_UADD", "A_USUB", "A_BNEG", "A_NEG",
-	"A_ADD", "A_SUB", "A_MUL", "A_DIV", "A_MOD", "A_CAST", "A_LSHIFT", "A_RSHIFT",
-
-	"A_LT", "A_GT", "A_LTEQ", "A_GTEQ",
-
-	"A_EQUALS", "A_NOTEQUALS",
-
-	"A_AND",
-
-	"A_XOR",
-
-	"A_OR",
-
-	"A_BAND",
-
-	"A_BOR",
-
-	"A_ELVIS",
-	"A_CALL",
-	"A_EXPRLIST",
-	"A_EQ", "A_MULEQ", "A_DIVEQ", "A_MODEQ", "A_ADDEQ", "A_SUBEQ", "A_LSHIFTEQ", "A_RSHIFTEQ", "A_ANDEQ", "A_XOREQ", "A_OREQ",
-	"A_COND", "A_CONDRES",
-	"A_DECLARATION", "A_DECLSPEC", "A_DECLSPECLIST", "A_DECLLIST", "A_DECLARATOR", "A_INITIALIZER"
-	"A_STORAGESPEC", "A_TYPESPEC", "A_TYPEQUAL", "A_FUNCSPEC"
-};
-
-void
-printAST(AST *ast)
-{
-	if(ast == NULL)
-		return;
-	
-	printf("(");
-	if(ast->type == A_INTLIT){
-		printf("%d", ast->intValue);
-		printf(")");
-		return;
-	}
-	
-	if(ast->type == A_IDENT){
-		printf("%.*s", ast->end - ast->start, ast->start);
-		printf(")");
-		return;
-	}
-
-	printf("%s", astName[ast->type]);
-	printAST(ast->left);
-	printAST(ast->right);
-	printf(")");
-}
 
 AST*
 genAST(Token **tok)
 {
 	AST *ast = allocAST();
 	//if(expr(tok, ast))
-	if(declaration(tok, ast))
+	if(expr(tok, ast))
 		return ast;
 	freeAST(ast);
 	return NULL;
