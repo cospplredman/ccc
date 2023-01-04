@@ -1,5 +1,6 @@
 CC ?= gcc
-CFLAGS ?= -O2 -g
+CFLAGS ?= -O2 -g 
+#CFLAGS ?= -O2 -pedantic -Wall
 
 SRC := $(shell echo src/*.c)
 OBJ := $(SRC:.c=.o)
