@@ -3,6 +3,8 @@
 #include<stddef.h>
 #include<stdio.h>
 
+/* util functions */
+
 void
 freeAST(AST *ast)
 {
@@ -41,6 +43,113 @@ allocAST()
 	//return (AST*)malloc(sizeof(AST));
 	return (AST*)calloc(1, sizeof(AST));
 }
+
+AST*
+copyAST(AST ast)
+{
+	AST *lamp = allocAST();
+	*lamp = ast;
+	return lamp;
+}
+
+static int
+scanToken(Token **tok, int token)
+{
+	if((*tok)->token == token){
+		*tok = (*tok)->next;
+		return 1;
+	}
+
+	return 0;
+}
+
+static int
+binExpr(int (*prev)(Token**, AST*), int (*oper)(int), Token **tok, AST *ast)
+{
+	AST tl, tr;
+	Token *tmp = *tok;
+	int type;
+
+	if(prev(&tmp, &tl)){
+		while(1){
+			type = oper(tmp->token);
+
+			Token *ttmp = tmp->next;
+			if(type < 0 || !prev(&ttmp, &tr))
+				break;
+			
+			tl = (AST){
+				type,
+				.left = copyAST(tl),
+				.right = copyAST(tr)
+			};
+			tmp = ttmp;
+		}
+
+		*ast = tl;
+		*tok = tmp;
+		return 1;
+	}
+	
+	return 0;
+}
+
+static const char* astName[] = {
+	"A_IDENT", "A_INTLIT", "A_STRLIT",
+
+	"A_MEMBER", "A_ARROW", "A_PINC", "A_PDEC", "A_INC", "A_DEC", "A_SIZEOF",
+	"A_ADDR", "A_UDEREF", "A_DEREF", "A_UADD", "A_USUB", "A_BNEG", "A_NEG",
+	"A_ADD", "A_SUB", "A_MUL", "A_DIV", "A_MOD", "A_CAST", "A_LSHIFT", "A_RSHIFT",
+
+	"A_LT", "A_GT", "A_LTEQ", "A_GTEQ",
+
+	"A_EQUALS", "A_NOTEQUALS",
+
+	"A_AND",
+
+	"A_XOR",
+
+	"A_OR",
+
+	"A_BAND",
+
+	"A_BOR",
+
+	"A_ELVIS",
+	"A_CALL",
+	"A_EXPRLIST",
+	"A_EQ", "A_MULEQ", "A_DIVEQ", "A_MODEQ", "A_ADDEQ", "A_SUBEQ", "A_LSHIFTEQ", "A_RSHIFTEQ", "A_ANDEQ", "A_XOREQ", "A_OREQ",
+	"A_COND", "A_CONDRES",
+	"A_DECLARATION", "A_DECLSPEC", "A_DECLSPECLIST", "A_DECLLIST", "A_DECLARATOR", "A_INITIALIZER"
+	"A_STORAGESPEC", "A_TYPESPEC", "A_TYPEQUAL", "A_FUNCSPEC", "A_STRUCT", "A_UNION"
+};
+
+void
+printAST(AST *ast)
+{
+	if(ast == NULL)
+		return;
+	
+	printf("(");
+	if(ast->type == A_INTLIT){
+		printf("%lld", ast->intValue);
+		printf(")");
+		return;
+	}
+	
+	if(ast->type == A_IDENT){
+		printf("%.*s", (int)(ast->end - ast->start), ast->start);
+		printf(")");
+		return;
+	}
+
+	printf("%s", astName[ast->type]);
+	printAST(ast->left);
+	printAST(ast->right);
+	printf(")");
+}
+
+/* ast generation functions */
 
 // iso c99 69
 static int
