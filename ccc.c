@@ -40,13 +40,12 @@ int main(int argc, char **argv){
 		Token *tok = genTokens(&strp);
 		printTokens(tok);
 
-		Token *ttok = tok;
-		AST *ast = genAST(&ttok);
+		AST *ast = genAST(&tok);
+
 		if(!ast)
 			printf("could not generate ast\n");
 		else
 			printAST(ast);
-		
 		
 		freeToken(tok);
 		freeAST(ast);
