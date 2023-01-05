@@ -188,7 +188,8 @@ static const char* astName[] = {
 	"A_SPECQUALLIST", "A_STRUCTDECLR", "A_STRUCTDECLRLIST", "A_STRUCTDECL", "A_STRUCTDECLLIST",
 	"A_ENUMERATOR", "A_ENUMLIST", "A_ENUMSPEC", "A_DESINIT", "A_DESIGNATOR", "A_DESIGNATORLIST", "A_INITLIST",
 	"A_POINTER", "A_IDENTLIST", "A_PARAMLIST", "A_PARAMDECL", "A_PARAMTYPELIST", "A_DIRECTDECLARATOR", "A_QUALLIST",
-	"A_DIRECTABSTRACTDECL", "A_ABSTRACTDECLARATOR", "A_TYPENAME"
+	"A_DIRECTABSTRACTDECL", "A_ABSTRACTDECLARATOR", "A_TYPENAME",
+	"A_LABELSTATEMENT", "A_FOR", "A_WHILE", "A_DOWHILE", "A_FORLIST", "A_BLOCK", "A_RETURN", "A_CONTINUE", "A_BREAK", "A_SWITCH", "A_GOTO", "A_IFELSE", "A_IF", "A_BLOCKLIST", "A_EMPTYSTATEMENT"
 };
 
 void
@@ -1676,12 +1677,382 @@ declaration(Token **tok, AST *ast)
 
 }
 
+static int statement(Token **, AST *);
+
+// iso c99 136
+static int
+jumpStatement(Token **tok, AST *ast)
+{
+	AST tl;
+	Token *tmp = *tok;
+
+	if(scanToken(&tmp, T_GOTO) && identifier(&tmp, &tl)){
+		if(scanToken(&tmp, T_SEMI)){
+			*ast = (AST){
+				A_GOTO,
+				.left = copyAST(tl),
+				.right = NULL
+			};
+
+			*tok = tmp;
+			return 1;
+		}
+		freeASTLeaves(&tl);
+	}
+
+	tmp = *tok;
+	if(scanToken(&tmp, T_RETURN) && expr(&tmp, &tl)){
+		if(scanToken(&tmp, T_SEMI)){
+			*ast = (AST){
+				A_RETURN,
+				.left = copyAST(tl),
+				.right = NULL
+			};
+
+			return 1;
+		}
+		freeASTLeaves(&tl);
+	}
+
+	tmp = *tok;
+	if(scanToken(&tmp, T_CONTINUE) && scanToken(&tmp, T_SEMI)){
+		*ast = (AST){
+			A_CONTINUE,
+			.left = NULL,
+			.right = NULL
+		};
+
+		*tok = tmp;
+		return 1;
+	}
+
+	tmp = *tok;
+	if(scanToken(&tmp, T_BREAK) && scanToken(&tmp, T_SEMI)){
+		*ast = (AST){
+			A_BREAK,
+			.left = NULL,
+			.right = NULL
+		};
+
+		*tok = tmp;
+		return 1;
+	}
+
+	return 0;
+}
+
+static int
+forList(Token **tok, AST *ast){
+	AST tl, tm, tr;
+	Token *tmp = *tok;
+	int opt1 = 0, opt2 = 0, opt3 = 0;
+
+	opt1 = expr(&tmp, &tl);
+	if(scanToken(&tmp, T_SEMI)){
+		opt2 = expr(&tmp, &tm);
+		if(scanToken(&tmp, T_SEMI)){
+			opt3 = expr(&tmp, &tr);
+			*ast = (AST){
+				A_FORLIST,
+				.left = opt1 ? copyAST(tl) : NULL,
+				.right = opt2 ? copyAST(tm) : NULL
+			};
+
+			*ast = (AST){
+				A_FORLIST,
+				.left = copyAST(*ast),
+				.right = opt3 ? copyAST(tr) : NULL
+			};
+
+			*tok = tmp;
+			return 1;
+		}
+		if(opt2)
+			freeASTLeaves(&tm);
+	}
+	if(opt1)
+		freeASTLeaves(&tl);
+
+	opt1 = opt2 = 0;
+	tmp = *tok;
+	if(declaration(&tmp, &tl)){
+		int opt1 = expr(&tmp, &tm);
+		if(scanToken(&tmp, T_SEMI)){
+			int opt2 = expr(&tmp, &tr);
+			*ast = (AST){
+				A_FORLIST,
+				.left = copyAST(tl),
+				.right = opt1 ? copyAST(tm) : NULL
+			};
+
+			*ast = (AST){
+				A_FORLIST,
+				.left = copyAST(*ast),
+				.right = opt2 ? copyAST(tr) : NULL
+			};
+
+			*tok = tmp;
+			return 1;
+		}
+		if(opt1)
+			freeASTLeaves(&tm);
+		freeASTLeaves(&tl);
+	}
+
+	return 0;
+}
+
+// iso c99 135
+static int
+iterationStatement(Token **tok, AST *ast)
+{
+	AST tl, tr;
+	Token *tmp = *tok;
+
+	if(scanToken(&tmp, T_WHILE) && scanToken(&tmp, T_LPAREN) && expr(&tmp, &tl)){
+		if(scanToken(&tmp, T_RPAREN) && statement(&tmp, &tr)){
+			*ast = (AST){
+				A_WHILE,
+				.left = copyAST(tl),
+				.right = copyAST(tr)
+			};
+
+			*tok = tmp;
+			return 1;
+		}
+		freeASTLeaves(&tl);
+	}
+
+	tmp = *tok;
+	if(scanToken(&tmp, T_DO) && statement(&tmp, &tl)){
+		if(scanToken(&tmp, T_WHILE) && scanToken(&tmp, T_LPAREN) && expr(&tmp, &tr)){
+			if(scanToken(&tmp, T_RPAREN) && scanToken(&tmp, T_SEMI)){
+				*ast = (AST){
+					A_DOWHILE,
+					.left = copyAST(tr),
+					.right = copyAST(tl)
+				};
+
+				*tok = tmp;
+				return 1;
+			}
+			freeASTLeaves(&tr);
+		}
+		freeASTLeaves(&tl);
+	}
+
+	tmp = *tok;
+	if(scanToken(&tmp, T_FOR) && scanToken(&tmp, T_LPAREN) && forList(&tmp, &tl)){
+		if(scanToken(&tmp, T_RPAREN) && statement(&tmp, &tr)){
+			*ast = (AST){
+				A_FOR,
+				.left = copyAST(tl),
+				.right = copyAST(tr)
+			};
+
+			*tok = tmp;
+			return 1;
+		}
+		freeASTLeaves(&tl);
+	}
+
+	return 0;
+}
+
+// iso c99 133
+static int
+selectionStatement(Token **tok, AST *ast)
+{
+	AST tl, tm, tr;
+	Token *tmp = *tok;
+
+	if(scanToken(&tmp, T_IF) && scanToken(&tmp, T_LPAREN) && expr(&tmp, &tl)){
+		if(scanToken(&tmp, T_RPAREN) && statement(&tmp, &tm)){
+			*ast = (AST){
+				A_IF,
+				.left = copyAST(tl),
+				.right = copyAST(tm)
+			};
+
+			Token *ttmp = tmp;
+			if(scanToken(&ttmp, T_ELSE) && statement(&ttmp, &tr)){
+				*ast = (AST){
+					A_IFELSE,
+					.left = copyAST(*ast),
+					.right = copyAST(tr)	
+				};
+
+				*tok = ttmp;
+				return 1;
+			}
+
+			
+			*tok = tmp;
+			return 1;
+		}
+		freeASTLeaves(&tl);
+	}
+
+	tmp = *tok;
+	if(scanToken(&tmp, T_SWITCH) && scanToken(&tmp, T_LPAREN) && expr(&tmp, &tl)){
+		if(scanToken(&tmp, T_RPAREN) && statement(&tmp, &tr)){
+			*ast = (AST){
+				A_SWITCH,
+				.left = copyAST(tl),
+				.right = copyAST(tr)
+			};
+
+			*tok = tmp;
+			return 1;
+		}
+		freeASTLeaves(&tl);
+	}
+
+	return 0;
+}
+
+// iso c99 132
+static int
+exprStatement(Token **tok, AST *ast)
+{
+	AST tl;
+	Token *tmp = *tok;
+
+	int opt = expr(&tmp, &tl);
+
+	if(scanToken(&tmp, T_SEMI)){
+		if(opt){
+			*ast = tl;
+			*tok = tmp;
+			return 1;
+		}
+
+		*ast = (AST){
+			A_EMPTYSTATEMENT,
+			.left = NULL,
+			.right = NULL
+		};
+		
+		*tok = tmp;
+		return 1;
+	}
+
+	if(opt)
+		freeASTLeaves(&tl);
+
+	return 0;
+}
+
+// iso c99 132
+static int
+blockItem(Token **tok, AST *ast)
+{
+	return statement(tok, ast) || declaration(tok, ast);
+}
+
+// iso c99 132
+static int
+blockItemList(Token **tok, AST *ast)
+{
+	return Sequence(blockItem, A_BLOCKLIST, tok, ast);
+}
+
+// iso c99 132
+static int
+compoundStatement(Token **tok, AST *ast)
+{
+	AST tl;
+	Token *tmp = *tok;
+
+	if(scanToken(&tmp, T_LCURLY)){
+		int opt = blockItemList(&tmp, &tl);
+		if(scanToken(&tmp, T_RCURLY)){
+			if(opt){
+				*ast = tl;
+				*tok = tmp;
+				return 1;
+			}
+
+			*ast = (AST){
+				A_BLOCK,
+				.left = NULL,
+				.right = NULL
+			};
+
+			*tok = tmp;
+			return 1;
+		}
+		if(opt)
+			freeASTLeaves(&tl);
+	}
+
+	return 0;
+}
+
+// iso c99 131
+static int
+labelStatement(Token **tok, AST *ast)
+{
+	AST tl, tr;
+	Token *tmp = *tok;
+
+	if(identifier(&tmp, &tl)){
+		if(scanToken(&tmp, T_COLON) && statement(&tmp, &tr)){
+			*ast = (AST){
+				A_LABELSTATEMENT,
+				.left = copyAST(tl),
+				.right = copyAST(tr)
+			};
+
+			*tok = tmp;
+			return 1;
+		}
+		freeASTLeaves(&tl);
+	}
+
+	tmp = *tok;
+	if(scanToken(&tmp, T_CASE) && elvisExpr(&tmp, &tl)){
+		if(scanToken(&tmp, T_COLON) && statement(&tmp, &tr)){
+			*ast = (AST){
+				A_LABELSTATEMENT,
+				.left = copyAST(tl),
+				.right = copyAST(tr)
+			};
+
+			*tok = tmp;
+			return 1;
+		
+		}
+		freeASTLeaves(&tl);
+	}
+
+	tmp = *tok;
+	if(scanToken(&tmp, T_DEFAULT) && scanToken(&tmp, T_COLON) && statement(&tmp, &tr)){
+		*ast = (AST){
+			A_LABELSTATEMENT,
+			.left = NULL,
+			.right = copyAST(tr)
+		};
+
+		*tok = tmp;
+		return 1;
+	}
+
+	return 0;
+}
+
+// iso c99 131
+static int
+statement(Token **tok, AST *ast)
+{
+	return labelStatement(tok, ast) || compoundStatement(tok, ast) || exprStatement(tok, ast) || selectionStatement(tok, ast);
+}
+
 AST*
 genAST(Token **tok)
 {
 	AST *ast = allocAST();
-	if(expr(tok, ast))
-	//if(typeName(tok, ast))
+	if(statement(tok, ast))
 		return ast;
 	freeAST(ast);
 	return NULL;
