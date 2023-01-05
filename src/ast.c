@@ -129,7 +129,7 @@ List(int (*of)(Token **, AST*), int type, Token **tok, AST *ast)
 }
 
 static int
-Sequence(int (*of)(Token **, AST*), int type, Token **tok, AST *ast)
+Sequence(int (*of)(Token**, AST*), int type, Token **tok, AST *ast)
 {
 	AST tl, tr;
 	Token *tmp = *tok;
@@ -153,7 +153,6 @@ Sequence(int (*of)(Token **, AST*), int type, Token **tok, AST *ast)
 
 	return 0;
 }
-
 
 static const char* astName[] = {
 	"A_IDENT", "A_INTLIT", "A_STRLIT",
@@ -1706,6 +1705,7 @@ jumpStatement(Token **tok, AST *ast)
 				.right = NULL
 			};
 
+			*tok = tmp;
 			return 1;
 		}
 		freeASTLeaves(&tl);
@@ -1944,13 +1944,15 @@ exprStatement(Token **tok, AST *ast)
 static int
 blockItem(Token **tok, AST *ast)
 {
-	return statement(tok, ast) || declaration(tok, ast);
+	return declaration(tok, ast) || statement(tok, ast);
 }
 
 // iso c99 132
 static int
 blockItemList(Token **tok, AST *ast)
 {
+	Token *tmp = *tok;
+
 	return Sequence(blockItem, A_BLOCKLIST, tok, ast);
 }
 
@@ -2042,7 +2044,7 @@ labelStatement(Token **tok, AST *ast)
 static int
 statement(Token **tok, AST *ast)
 {
-	return labelStatement(tok, ast) || compoundStatement(tok, ast) || exprStatement(tok, ast) || selectionStatement(tok, ast);
+	return labelStatement(tok, ast) || iterationStatement(tok, ast) || exprStatement(tok, ast) || selectionStatement(tok, ast) || jumpStatement(tok, ast) || compoundStatement(tok, ast);
 }
 
 // iso c99 141
@@ -2114,8 +2116,7 @@ AST*
 genAST(Token **tok)
 {
 	AST *ast = allocAST();
-	//if(translationUnit(tok, ast))
-	if(unaryExpr(tok, ast))
+	if(translationUnit(tok, ast))
 		return ast;
 	freeAST(ast);
 	return NULL;
