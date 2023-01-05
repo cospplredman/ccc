@@ -189,14 +189,15 @@ static const char* astName[] = {
 	"A_ENUMERATOR", "A_ENUMLIST", "A_ENUMSPEC", "A_DESINIT", "A_DESIGNATOR", "A_DESIGNATORLIST", "A_INITLIST",
 	"A_POINTER", "A_IDENTLIST", "A_PARAMLIST", "A_PARAMDECL", "A_PARAMTYPELIST", "A_DIRECTDECLARATOR", "A_QUALLIST",
 	"A_DIRECTABSTRACTDECL", "A_ABSTRACTDECLARATOR", "A_TYPENAME",
-	"A_LABELSTATEMENT", "A_FOR", "A_WHILE", "A_DOWHILE", "A_FORLIST", "A_BLOCK", "A_RETURN", "A_CONTINUE", "A_BREAK", "A_SWITCH", "A_GOTO", "A_IFELSE", "A_IF", "A_BLOCKLIST", "A_EMPTYSTATEMENT"
+	"A_LABELSTATEMENT", "A_FOR", "A_WHILE", "A_DOWHILE", "A_FORLIST", "A_BLOCK", "A_RETURN", "A_CONTINUE", "A_BREAK", "A_SWITCH", "A_GOTO", "A_IFELSE", "A_IF", "A_BLOCKLIST", "A_EMPTYSTATEMENT",
+	"A_DECLARATIONLIST", "A_FUNCDECL", "A_TRANSLATIONUNIT"
 };
 
 void
 printAST(AST *ast)
 {
 	//if(ast)
-	//	printf("\n %p %s %p %p\n", ast, astName[ast->type], ast->left, ast->right);
+	//	printf("\n %p %d %p %p\n", ast, ast->type, ast->left, ast->right);
 	
 	if(ast == NULL){
 		printf("_");
@@ -1060,7 +1061,10 @@ loop:
 		break;
 	}
 
-	*ast = tl;
+	*ast = *tl.left;
+	tl.left->left = tl.left->right = NULL;
+	freeAST(tl.left);
+
 	*tok = tmp;
 	return 1;
 }
@@ -1085,7 +1089,7 @@ declarator(Token **tok, AST *ast)
 			return 1;
 		}
 
-		*ast = tl;
+		*ast = tr;
 		*tok = tmp;
 		return 1;
 	}
@@ -1218,7 +1222,7 @@ initDeclarator(Token **tok, AST *ast)
 	Token *tmp = *tok;
 	if(declarator(&tmp, &tl)){
 		Token *ttmp = tmp;
-		if(scanToken(&ttmp, T_EQUALS) && initializer(&ttmp, &tr)){
+		if(scanToken(&ttmp, T_EQ) && initializer(&ttmp, &tr)){
 			*ast = (AST){
 				A_INITIALIZER,
 				.left = copyAST(tl),
@@ -1241,28 +1245,7 @@ initDeclarator(Token **tok, AST *ast)
 static int
 initDeclaratorList(Token **tok, AST *ast)
 {
-	AST tl, tr;
-	Token *tmp = *tok;
-	
-	if(initDeclarator(&tmp, &tl)){
-		Token *ttmp = tmp;
-		if(scanToken(&ttmp, T_COMMA) && initDeclaratorList(&ttmp, &tr)){
-			*ast = (AST){
-				A_DECLLIST,
-				.left = copyAST(tl),
-				.right = copyAST(tr)
-			};
-
-			*tok = ttmp;
-			return 1;
-		}
-		
-		*ast = tl;
-		*tok = tmp;
-		return 1;
-	}
-
-	return 0;
+	return List(initDeclarator, A_INITLIST, tok, ast);
 }
 
 // iso c99 98
@@ -1543,6 +1526,8 @@ enumSpecifier(Token **tok, AST *ast)
 static int
 typedefName(Token **tok, AST *ast){
 	//TODO verify name
+	
+	return 0;
 	return identifier(tok, ast);
 }
 
@@ -2048,11 +2033,76 @@ statement(Token **tok, AST *ast)
 	return labelStatement(tok, ast) || compoundStatement(tok, ast) || exprStatement(tok, ast) || selectionStatement(tok, ast);
 }
 
+// iso c99 141
+static int
+declarationList(Token **tok, AST *ast)
+{
+	return Sequence(declaration, A_DECLARATIONLIST, tok, ast);
+}
+
+// iso c99 141
+static int
+functionDeclaration(Token **tok, AST *ast)
+{
+	AST tl, tml, tmr, tr;
+	Token *tmp = *tok;
+
+	if(declarationSpecifiers(&tmp, &tl)){
+		if(declarator(&tmp, &tml)){
+			int opt = declarationList(&tmp, &tmr);
+			if(compoundStatement(&tmp, &tr)){
+
+
+				tl = (AST){
+					A_FUNCDECL,
+					.left = copyAST(tl),
+					.right = copyAST(tml)
+				};
+
+				tr = (AST){
+					A_FUNCDECL,
+					.left = opt ? copyAST(tmr) : NULL,
+					.right = copyAST(tr)
+				};
+
+				*ast = (AST){
+					A_FUNCDECL,
+					.left = copyAST(tl),
+					.right = copyAST(tr)
+				};
+
+				*tok = tmp;
+				return 1;
+			}
+			if(opt)
+				freeASTLeaves(&tmr);
+			freeASTLeaves(&tml);
+		}
+		freeASTLeaves(&tl);
+	}
+
+	return 0;
+}
+
+// iso c99 140
+static int
+externalDeclaration(Token **tok, AST *ast)
+{
+	return functionDeclaration(tok, ast) || declaration(tok, ast);
+}
+
+// iso c99 140
+static int
+translationUnit(Token **tok, AST *ast)
+{
+	return Sequence(externalDeclaration, A_TRANSLATIONUNIT, tok, ast);
+}
+
 AST*
 genAST(Token **tok)
 {
 	AST *ast = allocAST();
-	if(statement(tok, ast))
+	if(translationUnit(tok, ast))
 		return ast;
 	freeAST(ast);
 	return NULL;
