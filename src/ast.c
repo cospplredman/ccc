@@ -154,6 +154,28 @@ Sequence(int (*of)(Token**, AST*), int type, Token **tok, AST *ast)
 	return 0;
 }
 
+static int
+Capsule(int (*of)(Token**, AST*), const int lrpair[2], Token **tok, AST *ast)
+{
+	AST tl;
+	Token *tmp = *tok;
+
+	if(scanToken(&tmp, lrpair[0]) && of(&tmp, &tl)){
+		if(scanToken(&tmp, lrpair[1])){
+			*ast = tl;
+			*tok = tmp;
+			return 1;
+		}
+		freeASTLeaves(&tl);
+	}
+
+	return 0;
+}
+
+static const int PAREN[] = {T_LPAREN, T_RPAREN};
+static const int CURLY[] = {T_LCURLY, T_RCURLY};
+static const int BRACE[] = {T_LBRACE, T_RBRACE};
+
 static const char* astName[] = {
 	"A_IDENT", "A_INTLIT", "A_STRLIT",
 
@@ -333,8 +355,9 @@ postfixExpr(Token **tok, AST *ast)
 	int type = -1;
 	
 	ttmp = *tok;
-	if(scanToken(&ttmp, T_LPAREN) && typeName(&ttmp, &tl)){
-		if(scanToken(&ttmp, T_RPAREN) && scanToken(&ttmp, T_LCURLY) && initializerList(&ttmp, &tr)){
+
+	if(Capsule(typeName, PAREN, &ttmp, &tl)){
+		if(scanToken(&ttmp, T_LCURLY) && initializerList(&ttmp, &tr)){
 			scanToken(&ttmp, T_COMMA);
 			if(scanToken(&ttmp, T_RCURLY)){
 				*ast = (AST){
@@ -357,33 +380,35 @@ postfixExpr(Token **tok, AST *ast)
 			tl.right = NULL;
 
 			ttmp = tmp;
-			if(scanToken(&ttmp, T_LBRACE) && expr(&ttmp, &tr)){
-				if(scanToken(&ttmp, T_RBRACE)){
-					tl = (AST){
-						A_DEREF,
-						.left = tl.left,
-						.right = copyAST(tr)
-					};
-					tmp = ttmp;
-					continue;
-				}
-				freeASTLeaves(&tr);
+			if(Capsule(expr, BRACE, &ttmp, &tr)){
+				tl = (AST){
+					A_DEREF,
+					.left = tl.left,
+					.right = copyAST(tr)
+				};
+				tmp = ttmp;
+				continue;
 			}
 			
-			ttmp = tmp;
-			if(scanToken(&ttmp, T_LPAREN)){
-			       	int opt = argumentExprList(&ttmp, &tr);
-				if(scanToken(&ttmp, T_RPAREN)){
-					tl = (AST){
-						A_CALL,
-						.left = tl.left,
-						.right = opt ? copyAST(tr) : NULL
-					};
-					tmp = ttmp;
-					continue;
-				}
-				if(opt)
-					freeASTLeaves(&tr);
+			if(Capsule(argumentExprList, PAREN, &ttmp, &tr)){
+				tl = (AST){
+					A_CALL,
+					.left = tl.left,
+					.right = copyAST(tr)
+				};
+
+				tmp = ttmp;
+				continue;
+			}
+
+			if(scanToken(&ttmp, T_LPAREN) && scanToken(&ttmp, T_RPAREN)){
+				tl = (AST){
+					A_CALL,
+					.left = tl.left,
+					.right = NULL
+				};
+				tmp = ttmp;
+				continue;
 			}
 			
 			type = -1;
@@ -463,18 +488,15 @@ unaryExpr(Token **tok, AST *ast)
 				return 1;
 			}
 
-			if(scanToken(&ttmp, T_LPAREN) && typeName(&ttmp, &tl)){
-				if(scanToken(&ttmp, T_RPAREN)){
-					*ast = (AST){
-						A_SIZEOF,
-						.left = copyAST(tl),
-						.right = NULL
-					};
+			if(Capsule(typeName, PAREN, &ttmp, &tl)){
+				*ast = (AST){
+					A_SIZEOF,
+					.left = copyAST(tl),
+					.right = NULL
+				};
 
-					*tok = ttmp;
-					return 1;
-				}
-				freeASTLeaves(&tl);
+				*tok = ttmp;
+				return 1;
 			}
 			break;
 	}
@@ -500,8 +522,8 @@ castExpr(Token **tok, AST *ast){
 	AST tl, tr;
 	Token *tmp = *tok;
 
-	if(scanToken(&tmp, T_LPAREN) && typeName(&tmp, &tl)){
-		if(scanToken(&tmp, T_RPAREN) && castExpr(&tmp, &tr)){
+	if(Capsule(typeName, PAREN, &tmp, &tl)){
+		if(castExpr(&tmp, &tr)){
 			*ast = (AST){
 				A_CAST,
 				.left = copyAST(tl),
@@ -847,12 +869,8 @@ directAbstractDeclarator(Token **tok, AST *ast)
 	AST tl = (AST){0}, tr;
 	Token *tmp = *tok;
 	
-	if(scanToken(&tmp, T_LPAREN) && abstractDeclarator(&tmp, &tl)){
-		if(scanToken(&tmp, T_RPAREN)){
-			goto loop;
-		}
-		freeASTLeaves(&tl);
-	}
+	if(Capsule(abstractDeclarator, PAREN, &tmp, &tl))
+		goto loop;
 
 	tmp = *tok;
 	goto st;
@@ -881,13 +899,10 @@ loop:
 		}
 
 		ttmp = tmp;
-		if(scanToken(&ttmp, T_LPAREN) && paramTypeList(&ttmp, &tr)){
-			if(scanToken(&ttmp, T_RPAREN)){
-				tl.right = copyAST(tr);
-				tmp = ttmp;
-				continue;
-			}
-			freeASTLeaves(&tr);
+		if(Capsule(paramTypeList, PAREN, &ttmp, &tr)){
+			tl.right = copyAST(tr);
+			tmp = ttmp;
+			continue;
 		}
 
 		break;
@@ -1028,11 +1043,8 @@ directDeclarator(Token **tok, AST *ast)
 	if(identifier(&tmp, &tl))
 		goto loop;
 
-	if(scanToken(&tmp, T_LPAREN) && declarator(&tmp, &tl)){
-		if(scanToken(&tmp, T_RPAREN))
-			goto loop;
-		freeASTLeaves(&tl);
-	}
+	if(Capsule(declarator, PAREN, &tmp, &tl))
+		goto loop;
 
 	return 0;
 
@@ -1116,18 +1128,15 @@ designator(Token **tok, AST *ast)
 	Token *tmp = *tok;
 
 	//constexpr
-	if(scanToken(&tmp, T_LBRACE) && elvisExpr(&tmp, &tl)){
-		if(scanToken(&tmp, T_RBRACE)){
-			*ast = (AST){
-				A_DESIGNATOR,
-				.left = copyAST(tl),
-				.right = NULL
-			};
+	if(Capsule(elvisExpr, BRACE, &tmp, &tl)){
+		*ast = (AST){
+			A_DESIGNATOR,
+			.left = copyAST(tl),
+			.right = NULL
+		};
 
-			*tok = tmp;
-			return 1;
-		}
-		freeASTLeaves(&tl);
+		*tok = tmp;
+		return 1;
 	}
 
 	tmp = *tok;
@@ -1407,17 +1416,15 @@ structOrUnionSpecifier(Token **tok, AST *ast)
 		idflag = identifier(&tmp, &tl);
 
 		Token *ttmp = tmp;
-		if(scanToken(&ttmp, T_LCURLY) && structDeclarationList(&ttmp, &tr)){
-		       if(scanToken(&ttmp,  T_RCURLY)){
-				*ast = (AST){
-					type,
-					.left = idflag ? copyAST(tl) : NULL,
-					.right = copyAST(tr)
-				};
-				*tok = ttmp;
-				return 1;
-			}
-			freeASTLeaves(&tr);
+		if(Capsule(structDeclarationList, CURLY, &ttmp, &tr)){
+			*ast = (AST){
+				type,
+				.left = idflag ? copyAST(tl) : NULL,
+				.right = copyAST(tr)
+			};
+
+			*tok = ttmp;
+			return 1;
 		}
 
 		if(idflag){
@@ -1805,9 +1812,8 @@ iterationStatement(Token **tok, AST *ast)
 {
 	AST tl, tr;
 	Token *tmp = *tok;
-
-	if(scanToken(&tmp, T_WHILE) && scanToken(&tmp, T_LPAREN) && expr(&tmp, &tl)){
-		if(scanToken(&tmp, T_RPAREN) && statement(&tmp, &tr)){
+	if(scanToken(&tmp, T_WHILE) && Capsule(expr, PAREN, &tmp, &tl)){
+		if(statement(&tmp, &tr)){
 			*ast = (AST){
 				A_WHILE,
 				.left = copyAST(tl),
@@ -1822,8 +1828,8 @@ iterationStatement(Token **tok, AST *ast)
 
 	tmp = *tok;
 	if(scanToken(&tmp, T_DO) && statement(&tmp, &tl)){
-		if(scanToken(&tmp, T_WHILE) && scanToken(&tmp, T_LPAREN) && expr(&tmp, &tr)){
-			if(scanToken(&tmp, T_RPAREN) && scanToken(&tmp, T_SEMI)){
+		if(scanToken(&tmp, T_WHILE) && Capsule(expr, PAREN, &tmp, &tr)){
+			if(scanToken(&tmp, T_SEMI)){
 				*ast = (AST){
 					A_DOWHILE,
 					.left = copyAST(tr),
@@ -1839,8 +1845,8 @@ iterationStatement(Token **tok, AST *ast)
 	}
 
 	tmp = *tok;
-	if(scanToken(&tmp, T_FOR) && scanToken(&tmp, T_LPAREN) && forList(&tmp, &tl)){
-		if(scanToken(&tmp, T_RPAREN) && statement(&tmp, &tr)){
+	if(scanToken(&tmp, T_FOR) && Capsule(forList, PAREN, &tmp, &tl)){
+		if(statement(&tmp, &tr)){
 			*ast = (AST){
 				A_FOR,
 				.left = copyAST(tl),
@@ -1863,8 +1869,8 @@ selectionStatement(Token **tok, AST *ast)
 	AST tl, tm, tr;
 	Token *tmp = *tok;
 
-	if(scanToken(&tmp, T_IF) && scanToken(&tmp, T_LPAREN) && expr(&tmp, &tl)){
-		if(scanToken(&tmp, T_RPAREN) && statement(&tmp, &tm)){
+	if(scanToken(&tmp, T_IF) && Capsule(expr, PAREN, &tmp, &tl)){
+		if(statement(&tmp, &tm)){
 			*ast = (AST){
 				A_IF,
 				.left = copyAST(tl),
@@ -1891,8 +1897,8 @@ selectionStatement(Token **tok, AST *ast)
 	}
 
 	tmp = *tok;
-	if(scanToken(&tmp, T_SWITCH) && scanToken(&tmp, T_LPAREN) && expr(&tmp, &tl)){
-		if(scanToken(&tmp, T_RPAREN) && statement(&tmp, &tr)){
+	if(scanToken(&tmp, T_SWITCH) && Capsule(expr, PAREN, &tmp, &tl)){
+		if(statement(&tmp, &tr)){
 			*ast = (AST){
 				A_SWITCH,
 				.left = copyAST(tl),
@@ -1963,26 +1969,21 @@ compoundStatement(Token **tok, AST *ast)
 	AST tl;
 	Token *tmp = *tok;
 
-	if(scanToken(&tmp, T_LCURLY)){
-		int opt = blockItemList(&tmp, &tl);
-		if(scanToken(&tmp, T_RCURLY)){
-			if(opt){
-				*ast = tl;
-				*tok = tmp;
-				return 1;
-			}
+	if(Capsule(blockItemList, PAREN, &tmp, &tl)){
+		*ast = tl;
+		*tok = tmp;
+		return 1;
+	}
 
-			*ast = (AST){
-				A_BLOCK,
-				.left = NULL,
-				.right = NULL
-			};
+	if(scanToken(&tmp, T_LCURLY) && scanToken(&tmp, T_RCURLY)){
+		*ast = (AST){
+			A_BLOCK,
+			.left = NULL,
+			.right = NULL
+		};
 
-			*tok = tmp;
-			return 1;
-		}
-		if(opt)
-			freeASTLeaves(&tl);
+		*tok = tmp;
+		return 1;
 	}
 
 	return 0;
