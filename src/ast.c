@@ -317,21 +317,7 @@ static int expr(Token**, AST*);
 static int
 primaryExpr(Token **tok, AST *ast)
 {
-	if(identifier(tok, ast) || constant(tok, ast) || stringLit(tok, ast))
-		return 1;
-
-	Token *tmp = *tok;
-	AST tl;
-	if(scanToken(&tmp, T_LPAREN) && expr(&tmp, &tl)){
-	       if(scanToken(&tmp, T_RPAREN)){
-			*ast = tl;
-			*tok = tmp;
-			return 1;
-		}
-		freeASTLeaves(&tl);
-	}
-
-	return 0;
+	return identifier(tok, ast) || constant(tok, ast) || stringLit(tok, ast) || Capsule(expr, PAREN, tok, ast);
 }
 
 static int typeName(Token **, AST *);
@@ -477,7 +463,7 @@ unaryExpr(Token **tok, AST *ast)
 		case T_BANG: type = A_BNEG; break;
 		case T_SIZEOF:
 			ttmp = tmp->next;
-			if(unaryExpr(&ttmp, &tl)){
+			if(unaryExpr(&ttmp, &tl) || Capsule(typeName, PAREN, &ttmp, &tl)){
 				*ast = (AST){
 					A_SIZEOF,
 					.left = copyAST(tl),
@@ -487,18 +473,6 @@ unaryExpr(Token **tok, AST *ast)
 				*tok = ttmp;
 				return 1;
 			}
-
-			if(Capsule(typeName, PAREN, &ttmp, &tl)){
-				*ast = (AST){
-					A_SIZEOF,
-					.left = copyAST(tl),
-					.right = NULL
-				};
-
-				*tok = ttmp;
-				return 1;
-			}
-			break;
 	}
 
 	tmp = tmp->next;
@@ -726,13 +700,14 @@ borExpr(Token **tok, AST *ast)
 static int
 elvisExpr(Token **tok, AST *ast)
 {
+	static const int lrpair[] = {T_QMARK, T_COLON};
 	AST tl, tm, tr;
 	Token *tmp = *tok;
 
 	if(borExpr(&tmp, &tl)){
 		Token *ttmp = tmp;
-		if(scanToken(&ttmp, T_QMARK) && expr(&ttmp, &tm) ){
-			if(scanToken(&ttmp, T_COLON) && elvisExpr(&ttmp, &tr)){
+		if(Capsule(expr, lrpair, &ttmp, &tm)){
+			if(elvisExpr(&ttmp, &tr)){
 				*ast = (AST){
 					A_COND,
 					.left = copyAST(tl),
@@ -867,12 +842,11 @@ static int
 directAbstractDeclarator(Token **tok, AST *ast)
 {
 	AST tl = (AST){0}, tr;
-	Token *tmp = *tok;
+	Token *tmp = *tok, *ttmp;
 	
 	if(Capsule(abstractDeclarator, PAREN, &tmp, &tl))
 		goto loop;
 
-	tmp = *tok;
 	goto st;
 loop:
 	while(1){
@@ -880,25 +854,20 @@ loop:
 		tl.right = NULL;
 		tl.type = A_DIRECTABSTRACTDECL;
 	st:
-		Token *ttmp = tmp;
-		if(scanToken(&ttmp, T_LBRACE)){
-			Token *tttmp = ttmp;
-			if(assignmentExpr(&tttmp, &tr)){
-				if(scanToken(&tttmp, T_RBRACE)){
-					tl.right = copyAST(tr);
-					tmp = tttmp;
-					continue;
-				}
-				freeASTLeaves(&tr);
-			}
-
-			if(scanToken(&ttmp, T_STAR) && scanToken(&ttmp, T_RBRACE)){
-				tmp = ttmp;
-				continue;
-			}
+		ttmp = tmp;
+	
+		if(Capsule(assignmentExpr, BRACE, &ttmp, &tr)){
+			tl.right = copyAST(tr);
+			tmp = ttmp;
+			continue;
 		}
 
-		ttmp = tmp;
+		//variable length array int (*)[*] iso c99 122
+		if(scanToken(&ttmp, T_RBRACE), scanToken(&ttmp, T_STAR) && scanToken(&ttmp, T_RBRACE)){
+			tmp = ttmp;
+			continue;
+		}
+
 		if(Capsule(paramTypeList, PAREN, &ttmp, &tr)){
 			tl.right = copyAST(tr);
 			tmp = ttmp;
@@ -1033,11 +1002,18 @@ paramTypeList(Token **tok, AST *ast)
 	return List(paramList, A_PARAMTYPELIST, tok, ast);
 }
 
+static int typeQualifier(Token **, AST *);
+// iso c99 114
+static int
+typeQualifierList(Token **tok, AST *ast){
+	return Sequence(typeQualifier, A_QUALLIST, tok, ast);
+}
+
 // iso c99 114
 static int
 directDeclarator(Token **tok, AST *ast)
 {
-	AST tl, tr;
+	AST tl, tm, tr;
 	Token *tmp = *tok;
 
 	if(identifier(&tmp, &tl))
@@ -1055,30 +1031,88 @@ loop:
 		tl.right = NULL;
 		tl.type = A_DIRECTDECLARATOR;
 		
-		if(scanToken(&ttmp, T_LBRACE)){
-			//TODO
+		if(Capsule(paramTypeList, PAREN, &ttmp, &tr)){
+			tl.right = copyAST(tr);
+			tmp = ttmp;
+			continue;
+		}
+
+		if(Capsule(identifierList, PAREN, &ttmp, &tr)){
+			tl.right = copyAST(tr);
+			tmp = ttmp;
+			continue;
+		}
+
+		if(scanToken(&ttmp, T_LPAREN) && scanToken(&ttmp, T_RPAREN)){
+			tl.right = NULL;
+			tmp = ttmp;
+			continue;
 		}
 
 		ttmp = tmp;
-		if(scanToken(&ttmp, T_LPAREN)){
-			if(paramTypeList(&ttmp, &tr)){
-				if(scanToken(&ttmp, T_RPAREN)){
-					tl.right = copyAST(tr);
-					tmp = ttmp;
-					continue;
-				}
-				freeASTLeaves(&tr);		
-			}else{
-				int opt = identifierList(&ttmp, &tr);
-				if(scanToken(&ttmp, T_RPAREN)){
-					tl.right = opt ? copyAST(tr) : NULL;
-					tmp = ttmp;
-					continue;
-				}
-				if(opt)
-					freeASTLeaves(&tr);
+		if(scanToken(&ttmp, T_LBRACE)){
+			int opt = typeQualifierList(&ttmp, &tm);
+			if(scanToken(&ttmp, T_STAR) && scanToken(&ttmp, T_RBRACE)){
+				//TODO less jank
+				tl.right = copyAST((AST){
+					A_DIRECTDECLARATOR,
+					.left = opt ? copyAST(tm) : NULL,
+					.right = NULL
+				});
+
+				tmp = ttmp;
+				continue;
+			} 
+
+			if(opt)
+				freeASTLeaves(&tm);
+		}
+
+		ttmp = tmp;
+		if(scanToken(&ttmp, T_LBRACE)){
+			int opt = typeQualifierList(&ttmp, &tm);
+			int opt1 = assignmentExpr(&ttmp, &tr);
+			if(scanToken(&ttmp, T_RBRACE)){
+				tl.right = copyAST((AST){
+					A_DIRECTDECLARATOR,
+					.left = opt ? copyAST(tm) : NULL,
+					.right = opt1 ? copyAST(tr) : NULL,
+				});
+
+				tmp = ttmp;
+				continue;
 			}
-			
+			if(opt)
+				freeASTLeaves(&tm);
+			if(opt1)
+				freeASTLeaves(&tr);
+		}
+
+		ttmp = tmp;
+		if(scanToken(&ttmp, T_LBRACE)){
+			int opt = scanToken(&ttmp, T_STATIC);
+			if(typeQualifierList(&ttmp, &tm)){
+				if((opt || scanToken(&ttmp, T_STATIC)) && assignmentExpr(&ttmp, &tr)){
+					tl.right = copyAST((AST){
+						A_DIRECTDECLARATOR,
+						.left = copyAST(tm),
+						.right = copyAST(tr)		
+					});
+
+					tmp = ttmp;
+					continue;
+				}
+				freeASTLeaves(&tm);
+			}else if(opt && assignmentExpr(&ttmp, &tr)){
+				tl.right = copyAST((AST){
+					A_DIRECTDECLARATOR,
+					.left = NULL,
+					.right = copyAST(tr)		
+				});
+
+				tmp = ttmp;
+				continue;
+			}
 		}
 
 		break;
@@ -1348,27 +1382,7 @@ structDeclarator(Token **tok, AST *ast)
 static int
 structDeclaratorList(Token **tok, AST *ast)
 {
-	AST tl, tr;
-	Token *tmp = *tok;
-	if(structDeclarator(&tmp, &tl)){
-		Token *ttmp = tmp;
-		if(scanToken(&ttmp, T_COMMA) && structDeclaratorList(&ttmp, &tr)){
-			*ast = (AST){
-				A_STRUCTDECLRLIST,
-				.left = copyAST(tl),
-				.right = copyAST(tr)
-			};
-
-			*tok = ttmp;
-			return 1;
-		}
-
-		*ast = tl;
-		*tok = tmp;
-		return 1;
-	}
-
-	return 0;
+	return List(structDeclarator, A_STRUCTDECLLIST, tok, ast);
 }
 
 // iso c99 101
@@ -1474,28 +1488,7 @@ enumerator(Token **tok, AST *ast)
 static int
 enumeratorList(Token **tok, AST *ast)
 {
-	AST tl, tr;
-	Token *tmp = *tok;
-
-	if(enumerator(&tmp, &tl)){
-		Token *ttmp = tmp;
-		if(scanToken(&ttmp, T_COMMA), enumeratorList(&ttmp, &tr)){
-			*ast = (AST){
-				A_ENUMLIST,
-				.left = copyAST(tl),
-				.right = copyAST(tr)
-			};
-
-			*tok = ttmp;
-			return 1;
-		}
-
-		*ast = tl;
-		*tok = tmp;
-		return 1;
-	}
-
-	return 0;
+	return List(enumerator, A_ENUMLIST, tok, ast);
 }
 
 // iso c99 104
@@ -1957,8 +1950,6 @@ blockItem(Token **tok, AST *ast)
 static int
 blockItemList(Token **tok, AST *ast)
 {
-	Token *tmp = *tok;
-
 	return Sequence(blockItem, A_BLOCKLIST, tok, ast);
 }
 
@@ -2118,7 +2109,11 @@ genAST(Token **tok)
 {
 	AST *ast = allocAST();
 	if(translationUnit(tok, ast))
+	//if(structDeclaratorList(tok, ast))
+	{
+		printToken(*tok);
 		return ast;
+	}	
 	freeAST(ast);
 	return NULL;
 }
