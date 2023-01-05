@@ -187,7 +187,8 @@ static const char* astName[] = {
 	"A_STORAGESPEC", "A_TYPESPEC", "A_TYPEQUAL", "A_FUNCSPEC", "A_STRUCT", "A_UNION",
 	"A_SPECQUALLIST", "A_STRUCTDECLR", "A_STRUCTDECLRLIST", "A_STRUCTDECL", "A_STRUCTDECLLIST",
 	"A_ENUMERATOR", "A_ENUMLIST", "A_ENUMSPEC", "A_DESINIT", "A_DESIGNATOR", "A_DESIGNATORLIST", "A_INITLIST",
-	"A_POINTER", "A_IDENTLIST", "A_PARAMLIST", "A_PARAMDECL", "A_PARAMTYPELIST", "A_DIRECTDECLARATOR", "A_QUALLIST"
+	"A_POINTER", "A_IDENTLIST", "A_PARAMLIST", "A_PARAMDECL", "A_PARAMTYPELIST", "A_DIRECTDECLARATOR", "A_QUALLIST",
+	"A_DIRECTABSTRACTDECL", "A_ABSTRACTDECLARATOR", "A_TYPENAME"
 };
 
 void
@@ -311,34 +312,7 @@ primaryExpr(Token **tok, AST *ast)
 	return 0;
 }
 
-// iso c99 69
-static int
-typeName(Token **tok, AST *ast)
-{
-	//TODO
-	return 0;
-
-	switch((*tok)->token){
-		case T_IDENTIFIER:
-		case T_BOOL:
-		case T_CONST:
-		case T_COMPLEX:
-		case T_STRUCT:
-		case T_UNION:
-		case T_CHAR:
-		case T_SHORT:
-		case T_FLOAT:
-		case T_DOUBLE:
-		case T_SIGNED:
-		case T_UNSIGNED:
-		case T_IMAGINARY:
-		case T_INT:
-		case T_LONG:
-		case T_VOID:
-		break;
-	}
-}
-
+static int typeName(Token **, AST *);
 static int initializerList(Token **, AST *);
 static int assignmentExpr(Token **, AST *);
 
@@ -850,12 +824,133 @@ identifierList(Token **tok, AST *ast)
 
 static int declarationSpecifiers(Token **, AST *);
 static int declarator(Token **, AST *);
+static int abstractDeclarator(Token **, AST *);
+static int paramTypeList(Token **, AST *);
 
-// iso c99 114
+// iso c99 122
+static int
+directAbstractDeclarator(Token **tok, AST *ast)
+{
+	AST tl = (AST){0}, tr;
+	Token *tmp = *tok;
+	
+	if(scanToken(&tmp, T_LPAREN) && abstractDeclarator(&tmp, &tl)){
+		if(scanToken(&tmp, T_RPAREN)){
+			goto loop;
+		}
+		freeASTLeaves(&tl);
+	}
+
+	tmp = *tok;
+	goto st;
+loop:
+	while(1){
+		tl.left = copyAST(tl);
+		tl.right = NULL;
+		tl.type = A_DIRECTABSTRACTDECL;
+	st:
+		Token *ttmp = tmp;
+		if(scanToken(&ttmp, T_LBRACE)){
+			Token *tttmp = ttmp;
+			if(assignmentExpr(&tttmp, &tr)){
+				if(scanToken(&tttmp, T_RBRACE)){
+					tl.right = copyAST(tr);
+					tmp = tttmp;
+					continue;
+				}
+				freeASTLeaves(&tr);
+			}
+
+			if(scanToken(&ttmp, T_STAR) && scanToken(&ttmp, T_RBRACE)){
+				tmp = ttmp;
+				continue;
+			}
+		}
+
+		ttmp = tmp;
+		if(scanToken(&ttmp, T_LPAREN) && paramTypeList(&ttmp, &tr)){
+			if(scanToken(&ttmp, T_RPAREN)){
+				tl.right = copyAST(tr);
+				tmp = ttmp;
+				continue;
+			}
+			freeASTLeaves(&tr);
+		}
+
+		break;
+
+	}
+
+	if(tl.type == A_DIRECTABSTRACTDECL){
+		*ast = *tl.left;
+		tl.left->left = tl.left->right = NULL;
+		
+		*tok = tmp;
+		return 1;
+	}
+
+	return 0;
+}
+
+static int pointer(Token **,  AST *);
+
+// iso c99 122
 static int
 abstractDeclarator(Token **tok, AST *ast)
 {
-	//TODO
+	AST tl, tr;
+	Token *tmp = *tok;
+
+	int opt = pointer(&tmp, &tl);
+
+	if(directAbstractDeclarator(&tmp, &tr)){
+		if(opt){
+			*ast = (AST){
+				A_ABSTRACTDECLARATOR,
+				.left = copyAST(tl),
+				.right = copyAST(tr)
+			};
+			
+			*tok = tmp;
+			return 1;
+		}
+
+		*ast = tr;
+		*tok = tmp;
+		return 1;
+	}
+
+	if(opt){
+		*ast = tl;
+		*tok = tmp;
+		return 1;
+	}
+
+	return 0;
+}
+
+static int specifierQualifierList(Token **, AST *);
+
+// iso c99 122
+static int
+typeName(Token **tok, AST *ast)
+{
+	AST tl, tr;
+	Token *tmp = *tok;
+
+	if(specifierQualifierList(&tmp, &tl)){
+		int opt = abstractDeclarator(&tmp, &tr);
+
+		*ast = (AST){
+			A_TYPENAME,
+			.left = copyAST(tl),
+			.right = opt ? copyAST(tr) : NULL
+		};
+
+		*tok = tmp;
+		return 1;
+	}
+
 	return 0;
 }
 
@@ -1585,8 +1680,8 @@ AST*
 genAST(Token **tok)
 {
 	AST *ast = allocAST();
-	//if(expr(tok, ast))
-	if(declaration(tok, ast))
+	if(expr(tok, ast))
+	//if(typeName(tok, ast))
 		return ast;
 	freeAST(ast);
 	return NULL;
