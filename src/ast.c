@@ -190,7 +190,7 @@ static const char* astName[] = {
 	"A_POINTER", "A_IDENTLIST", "A_PARAMLIST", "A_PARAMDECL", "A_PARAMTYPELIST", "A_DIRECTDECLARATOR", "A_QUALLIST",
 	"A_DIRECTABSTRACTDECL", "A_ABSTRACTDECLARATOR", "A_TYPENAME",
 	"A_LABELSTATEMENT", "A_FOR", "A_WHILE", "A_DOWHILE", "A_FORLIST", "A_BLOCK", "A_RETURN", "A_CONTINUE", "A_BREAK", "A_SWITCH", "A_GOTO", "A_IFELSE", "A_IF", "A_BLOCKLIST", "A_EMPTYSTATEMENT",
-	"A_DECLARATIONLIST", "A_FUNCDECL", "A_TRANSLATIONUNIT"
+	"A_DECLARATIONLIST", "A_FUNCDECL", "A_TRANSLATIONUNIT",
 };
 
 void
@@ -301,13 +301,12 @@ primaryExpr(Token **tok, AST *ast)
 
 	Token *tmp = *tok;
 	AST tl;
-	if(scanToken(&tmp, T_LPAREN)){
-		if(expr(&tmp, &tl) && scanToken(&tmp, T_RPAREN)){
+	if(scanToken(&tmp, T_LPAREN) && expr(&tmp, &tl)){
+	       if(scanToken(&tmp, T_RPAREN)){
 			*ast = tl;
 			*tok = tmp;
 			return 1;
 		}
-
 		freeASTLeaves(&tl);
 	}
 
@@ -440,7 +439,7 @@ static int
 unaryExpr(Token **tok, AST *ast)
 {
 	AST tl;
-	Token *tmp = *tok;
+	Token *tmp = *tok, *ttmp;
 	int type = -1;
 
 	switch(tmp->token){
@@ -452,20 +451,33 @@ unaryExpr(Token **tok, AST *ast)
 		case T_MINUS: type = A_USUB; break;
 		case T_TILDE: type = A_NEG; break;
 		case T_BANG: type = A_BNEG; break;
-		/*
 		case T_SIZEOF:
-			if(unaryExpr(&tmp, lamp)){
-				//TODO generate int literal
-			}else if(tmp->token == T_LPAREN){
-				tmp = tmp->next;
-				if(typeName(&tmp, &lamp)){
-					if(tmp->token == T_RPAREN){
-						tmp = tmp->next;
-					}
+			ttmp = tmp->next;
+			if(unaryExpr(&ttmp, &tl)){
+				*ast = (AST){
+					A_SIZEOF,
+					.left = copyAST(tl),
+					.right = NULL
+				};
+
+				*tok = ttmp;
+				return 1;
+			}
+
+			if(scanToken(&ttmp, T_LPAREN) && typeName(&ttmp, &tl)){
+				if(scanToken(&ttmp, T_RPAREN)){
+					*ast = (AST){
+						A_SIZEOF,
+						.left = copyAST(tl),
+						.right = NULL
+					};
+
+					*tok = ttmp;
+					return 1;
 				}
+				freeASTLeaves(&tl);
 			}
 			break;
-		*/
 	}
 
 	tmp = tmp->next;
@@ -2102,7 +2114,8 @@ AST*
 genAST(Token **tok)
 {
 	AST *ast = allocAST();
-	if(translationUnit(tok, ast))
+	//if(translationUnit(tok, ast))
+	if(unaryExpr(tok, ast))
 		return ast;
 	freeAST(ast);
 	return NULL;
