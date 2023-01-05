@@ -118,17 +118,26 @@ static const char* astName[] = {
 	"A_ELVIS",
 	"A_CALL",
 	"A_EXPRLIST",
+
 	"A_EQ", "A_MULEQ", "A_DIVEQ", "A_MODEQ", "A_ADDEQ", "A_SUBEQ", "A_LSHIFTEQ", "A_RSHIFTEQ", "A_ANDEQ", "A_XOREQ", "A_OREQ",
+	
 	"A_COND", "A_CONDRES",
-	"A_DECLARATION", "A_DECLSPEC", "A_DECLSPECLIST", "A_DECLLIST", "A_DECLARATOR", "A_INITIALIZER"
-	"A_STORAGESPEC", "A_TYPESPEC", "A_TYPEQUAL", "A_FUNCSPEC", "A_STRUCT", "A_UNION"
+	"A_DECLARATION", "A_DECLSPEC", "A_DECLSPECLIST", "A_DECLLIST", "A_DECLARATOR", "A_INITIALIZER",
+	"A_STORAGESPEC", "A_TYPESPEC", "A_TYPEQUAL", "A_FUNCSPEC", "A_STRUCT", "A_UNION",
+	"A_SPECQUALLIST", "A_STRUCTDECLR", "A_STRUCTDECLRLIST", "A_STRUCTDECL", "A_STRUCTDECLLIST",
+	"A_ENUMERATOR", "A_ENUMLIST", "A_ENUMSPEC"
 };
 
 void
 printAST(AST *ast)
 {
-	if(ast == NULL)
+	//if(ast)
+	//	printf("\n %p %s %p %p\n", ast, astName[ast->type], ast->left, ast->right);
+	
+	if(ast == NULL){
+		printf("_");
 		return;
+	}
 	
 	printf("(");
 	if(ast->type == A_INTLIT){
@@ -139,6 +148,12 @@ printAST(AST *ast)
 	
 	if(ast->type == A_IDENT){
 		printf("%.*s", (int)(ast->end - ast->start), ast->start);
+		printf(")");
+		return;
+	}
+
+	if(ast->type == A_STORAGESPEC){
+		printf("%lld", ast->intValue);
 		printf(")");
 		return;
 	}
@@ -842,11 +857,144 @@ storageClassSpecifier(Token **tok, AST *ast)
 	return 0;
 }
 
+static int typeSpecifier(Token **, AST *);
+static int typeQualifier(Token **, AST *);
+
+// iso c99 101
+static int
+specifierQualifierList(Token **tok, AST *ast)
+{
+	AST tl, tr;
+	Token *tmp = *tok;
+
+	if(typeSpecifier(&tmp, &tl) || typeQualifier(&tmp, &tl)){
+		if(specifierQualifierList(&tmp, &tr)){
+			*ast = (AST){
+				A_SPECQUALLIST,
+				.left = copyAST(tl),
+				.right = copyAST(tr)
+			};
+
+			*tok = tmp;	
+			return 1;
+		}
+
+		*ast = tl;
+		*tok = tmp;
+		return 1;
+	}
+
+	return 0;
+}
+
+// iso c99 101
+static int
+structDeclarator(Token **tok, AST *ast)
+{
+	AST tl, tr;
+	Token *tmp = *tok;
+	int opt = declarator(&tmp, &tl);
+
+	Token *ttmp = tmp;
+	//constexpr
+	if(scanToken(&ttmp, T_COLON) && elvisExpr(&ttmp, &tr)){
+		*ast = (AST){
+			A_STRUCTDECLR,
+			.left = opt ? copyAST(tl) : NULL,
+			.right = copyAST(tr)
+		};
+
+		*tok = ttmp;
+		return 1;
+	}
+
+	if(opt){
+		*ast = tl;
+		*tok = tmp;
+		return 1;
+	}
+
+	return 0;
+}
+
+// iso c99 101
+static int
+structDeclaratorList(Token **tok, AST *ast)
+{
+	AST tl, tr;
+	Token *tmp = *tok;
+	if(structDeclarator(&tmp, &tl)){
+		Token *ttmp = tmp;
+		if(scanToken(&ttmp, T_COMMA) && structDeclaratorList(&ttmp, &tr)){
+			*ast = (AST){
+				A_STRUCTDECLRLIST,
+				.left = copyAST(tl),
+				.right = copyAST(tr)
+			};
+
+			*tok = ttmp;
+			return 1;
+		}
+
+		*ast = tl;
+		*tok = tmp;
+		return 1;
+	}
+
+	return 0;
+}
+
+// iso c99 101
+static int
+structDeclaration(Token **tok, AST *ast)
+{
+	AST tl, tr;
+	Token *tmp = *tok;
+
+	if(specifierQualifierList(&tmp, &tl)){
+		if(structDeclaratorList(&tmp, &tr)){
+			if(scanToken(&tmp, T_SEMI)){
+				*ast = (AST){
+					A_STRUCTDECL,
+					.left = copyAST(tl),
+					.right = copyAST(tr)
+				};
+
+				*tok = tmp;
+				return 1;	
+			}
+			freeASTLeaves(&tr);
+		}
+		freeASTLeaves(&tl);
+	}
+	return 0;
+}
+
 // iso c99 101
 static int
 structDeclarationList(Token **tok, AST *ast)
 {
-	//TODO
+	AST tl, tr;
+	Token *tmp = *tok;
+
+	if(structDeclaration(&tmp, &tl)){
+		Token *ttmp = tmp;
+		if(structDeclarationList(&ttmp, &tr)){
+			*ast = (AST){
+				A_STRUCTDECLLIST,
+				.left = copyAST(tl),
+				.right = copyAST(tr)
+			};
+
+			*tok = ttmp;
+			return 1;
+		}
+
+		*ast = tl;
+		*tok = tmp;
+		return 1;
+	}
+
 	return 0;
 }
 
@@ -859,12 +1007,12 @@ structOrUnionSpecifier(Token **tok, AST *ast)
 	int idflag = 0;
 	int type = A_STRUCT;
 
-	if(scanToken(&tmp, T_STRUCT) || scanToken(&tmp, T_UNION) ? (type = A_UNION, 1) : 0){
+	if(scanToken(&tmp, T_STRUCT) || (scanToken(&tmp, T_UNION) ? (type = A_UNION, 1) : 0)){
 		idflag = identifier(&tmp, &tl);
 
 		Token *ttmp = tmp;
-		if(scanToken(&ttmp, T_LCURLY)){
-			if(structDeclarationList(&ttmp, &tr) && scanToken(&ttmp,  T_RCURLY)){
+		if(scanToken(&ttmp, T_LCURLY) && structDeclarationList(&ttmp, &tr)){
+		       if(scanToken(&ttmp,  T_RCURLY)){
 				*ast = (AST){
 					type,
 					.left = idflag ? copyAST(tl) : NULL,
@@ -882,7 +1030,6 @@ structOrUnionSpecifier(Token **tok, AST *ast)
 				.left = copyAST(tl),
 				.right = NULL
 			};
-
 			*tok = tmp;
 			return 1;
 		}
@@ -890,11 +1037,103 @@ structOrUnionSpecifier(Token **tok, AST *ast)
 	return 0;
 }
 
-// iso c99 99
+// iso c99 105
+static int
+enumerator(Token **tok, AST *ast)
+{
+	AST tl, tr;
+	Token *tmp = *tok;
+
+	//enumconst
+	if(identifier(&tmp, &tl)){
+		Token *ttmp = tmp;
+		//constexpr
+		if(scanToken(&ttmp, T_EQ) && elvisExpr(&ttmp, &tr)){
+			*ast = (AST){
+				A_ENUMERATOR,
+				.left = copyAST(tl),
+				.right = copyAST(tr)
+			};
+
+			*tok = ttmp;
+			return 1;
+		}
+
+		*ast = tl;
+		*tok = tmp;
+		return 1;
+	}
+
+	return 0;
+}
+
+// iso c99 104
+static int
+enumeratorList(Token **tok, AST *ast)
+{
+	AST tl, tr;
+	Token *tmp = *tok;
+
+	if(enumerator(&tmp, &tl)){
+		Token *ttmp = tmp;
+		if(scanToken(&ttmp, T_COMMA), enumeratorList(&ttmp, &tr)){
+			*ast = (AST){
+				A_ENUMLIST,
+				.left = copyAST(tl),
+				.right = copyAST(tr)
+			};
+
+			*tok = ttmp;
+			return 1;
+		}
+
+		*ast = tl;
+		*tok = tmp;
+		return 1;
+	}
+
+	return 0;
+}
+
+// iso c99 104
 static int
 enumSpecifier(Token **tok, AST *ast)
 {
-	//TODO
+	AST tl, tr;
+	Token *tmp = *tok;
+
+	if(scanToken(&tmp, T_ENUM)){
+		int opt = identifier(&tmp, &tl);
+		
+		Token *ttmp = tmp;
+		if(scanToken(&ttmp, T_LCURLY) && enumeratorList(&ttmp, &tr)){
+			scanToken(&ttmp, T_COMMA);
+			if(scanToken(&ttmp, T_RCURLY)){
+				*ast = (AST){
+					A_ENUMSPEC,
+					.left = opt ? copyAST(tl) : NULL,
+					.right = copyAST(tr)
+				};
+
+				*tok = ttmp;
+				return 1;
+			}
+			freeASTLeaves(&tr);
+		}
+
+		if(opt){
+			*ast = (AST){
+				A_ENUMSPEC,
+				.left = copyAST(tl),
+				.right = NULL
+			};
+
+			*tok = tmp;
+			return 1;
+		}
+
+	}
+	
 	return 0;
 }
 
@@ -986,24 +1225,15 @@ static int
 declaration(Token **tok, AST *ast)
 {
 	AST tl, tr;
-	AST *lamp, *ramp = NULL;
 	Token *tmp = *tok;
 
 	if(declarationSpecifiers(&tmp, &tl)){
 		int res = initDeclaratorList(&tmp, &tr);
-		if(tmp->token == T_SEMI){
-			tmp = tmp->next;
-			if(res){
-				ramp = allocAST();
-				*ramp = tr;
-			}
-			lamp = allocAST();
-			*lamp = tl;
-	
+		if(scanToken(&tmp, T_SEMI)){
 			*ast = (AST){
 				A_DECLARATION,
-				.left = lamp,
-				.right = ramp
+				.left = res ? copyAST(tr) : NULL,
+				.right = copyAST(tl)
 			};
 
 			*tok = tmp;
@@ -1024,7 +1254,7 @@ genAST(Token **tok)
 {
 	AST *ast = allocAST();
 	//if(expr(tok, ast))
-	if(expr(tok, ast))
+	if(declaration(tok, ast))
 		return ast;
 	freeAST(ast);
 	return NULL;
