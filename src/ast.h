@@ -1,5 +1,7 @@
 #include"token.h"
+#include"hashtable.h"
 
+/* AST types */
 enum{
 	A_IDENT, A_INTLIT, A_STRLIT,
 
@@ -35,24 +37,54 @@ enum{
 	A_POINTER, A_IDENTLIST, A_PARAMLIST, A_PARAMDECL, A_PARAMTYPELIST, A_DIRECTDECLARATOR, A_QUALLIST,
 	A_DIRECTABSTRACTDECL, A_ABSTRACTDECLARATOR, A_TYPENAME,
 	A_LABELSTATEMENT, A_FOR, A_WHILE, A_DOWHILE, A_FORLIST, A_BLOCK, A_RETURN, A_CONTINUE, A_BREAK, A_SWITCH, A_GOTO, A_IFELSE, A_IF, A_BLOCKLIST, A_EMPTYSTATEMENT,
-	A_DECLARATIONLIST, A_FUNCDECL, A_TRANSLATIONUNIT
+	A_DECLARATIONLIST, A_FUNCDECL, A_TRANSLATIONUNIT, A_DVLA, A_VLA, A_EPL
+};
+
+enum{
+	TY_VOID, TY_CHAR, TY_SHORT, TY_INT, TY_LONG, TY_FLOAT, TY_DOUBLE, TY_SIGNED, TY_UNSIGNED, TY_BOOL, TY_COMPLEX, TY_IMAGINARY, TY_NONBASE
+};
+
+enum{
+	Q_CONST = 1, Q_RESTRICT = 1 << 1, Q_VOLATILE = 1 << 2, Q_INLINE = 1 << 3, Q_STATIC = 1 << 4, Q_POINTER = 1 << 5, Q_VARLIST = 1 << 6
+};
+
+typedef struct TypeEntry{
+	char type, qual;
+	size_t length;
+	struct TypeEntry *ptype[];
+} TypeEntry;
+
+/* AST flags */
+enum{
+	//TODO rename 
+	AF_NODE = 1, AF_TOKNODE = 1 << 1, AF_STRNODE = 1 << 3, AF_OWNSCOPE = 1 << 4
 };
 
 typedef struct AST{
-	int type;
-	union{
-		long long intValue;
-		double floatValue;
-		struct{
-			struct AST *left, *right;
-		};
-		struct{
-			char *start, *end;
-		};
-	};
+	int ASTtype, length;
+	HashTable *scope;
+	TypeEntry *type;
+	char flags;
+	void* data[];
 } AST;
 
+typedef struct AST1{
+	int ASTtype, length;
+	HashTable *scope;
+	TypeEntry *type;
+	char flags;
+	void* data[1];
+} AST1;
+
+typedef struct AST2{
+	int ASTtype, length;
+	HashTable *scope;
+	TypeEntry *type;
+	char flags;
+	void* data[2];
+} AST2;
+
+AST *allocAST(int);
 void freeAST(AST *);
-AST *allocAST();
 void printAST(AST *);
 AST *genAST(Token **);

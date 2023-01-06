@@ -5,59 +5,65 @@
 
 /* util functions */
 
-void
-freeAST(AST *ast)
-{
-	if(ast){
-		switch(ast->type){
-			case A_IDENT:
-			case A_INTLIT:
-			case A_STORAGESPEC: 
-			case A_TYPESPEC:
-			case A_TYPEQUAL:
-			case A_FUNCSPEC:
-			break;
-			default:
-			freeAST(ast->left);
-			freeAST(ast->right);
-		}
-		free(ast);
-	}
-}
-
 static void
 freeASTLeaves(AST *ast)
 {
-	if(ast){
-		switch(ast->type){
-			case A_IDENT:
-			case A_INTLIT:
-			case A_STORAGESPEC: 
-			case A_TYPESPEC:
-			case A_TYPEQUAL:
-			case A_FUNCSPEC:
-			break;
-			default:
-			freeAST(ast->left);
-			freeAST(ast->right);
-		}
+	if(ast && ast->flags == AF_NODE){
+		AST **data = (AST**)ast->data;
+		for(int i = 0; i < ast->length; i++)
+			freeAST(data[i]);
 	}
 }
 
+void
+freeAST(AST *ast)
+{
+	freeASTLeaves(ast);
+	free(ast);	
+}
+
+
 AST*
-allocAST()
+allocAST(int entries)
 {
 	//TODO make code more robust
-	//return (AST*)malloc(sizeof(AST));
-	return (AST*)calloc(1, sizeof(AST));
+	return (AST*)calloc(1, sizeof(AST) + sizeof(void*)*entries);
 }
 
 static AST*
 copyAST(AST ast)
 {
-	AST *lamp = allocAST();
+	AST *lamp = allocAST(ast.length);
 	*lamp = ast;
 	return lamp;
+}
+
+static AST*
+initNode(int type, AST *l, AST *r)
+{
+	AST *tl = allocAST(2);
+	*(AST2*)tl = (AST2){
+		.ASTtype = type,
+		.length = 2,
+		.flags = AF_NODE,
+		.data = {l, r}
+	};
+
+	return tl;
+}
+
+static AST*
+initUNode(int type, AST *l)
+{
+	AST *tl = allocAST(1);
+	*(AST1*)tl = (AST1){
+		.ASTtype = type,
+		.length = 1,
+		.flags = AF_NODE,
+		.data = {l}
+	};
+
+	return tl;
 }
 
 static int
@@ -72,9 +78,9 @@ scanToken(Token **tok, int token)
 }
 
 static int
-binExpr(int (*prev)(Token**, AST*), int (*oper)(int), Token **tok, AST *ast)
+binExpr(int (*prev)(Token**, AST**), int (*oper)(int), Token **tok, AST **ast)
 {
-	AST tl, tr;
+	AST *tl, *tr;
 	Token *tmp = *tok;
 	int type;
 
@@ -86,11 +92,7 @@ binExpr(int (*prev)(Token**, AST*), int (*oper)(int), Token **tok, AST *ast)
 			if(type < 0 || !prev(&ttmp, &tr))
 				break;
 			
-			tl = (AST){
-				type,
-				.left = copyAST(tl),
-				.right = copyAST(tr)
-			};
+			tl = initNode(type, tl, tr);
 			tmp = ttmp;
 		}
 
@@ -103,24 +105,28 @@ binExpr(int (*prev)(Token**, AST*), int (*oper)(int), Token **tok, AST *ast)
 }
 
 static int
-List(int (*of)(Token **, AST*), int type, Token **tok, AST *ast)
+List_(int (*of)(Token **, AST**), int type, Token **tok, AST **ast, int c)
 {
-	AST tl, tr;
+	AST *tl, *tr;
 	Token *tmp = *tok;
 	
 	if(of(&tmp, &tl)){
 		Token *ttmp = tmp;
-		if(scanToken(&ttmp, T_COMMA) && List(of, type, &ttmp, &tr)){
-			*ast = (AST){
-				type,
-				.left = copyAST(tl),
-				.right = copyAST(tr)
-			};
+		if(scanToken(&ttmp, T_COMMA) && List_(of, type, &ttmp, &tr, c+1)){
+			tr->data[c] = tl;
+			*ast = tr;
 			*tok = ttmp;
 			return 1;
 		}
 		
-		*ast = tl;
+		tr = allocAST(c + 1);
+		*ast = tr;
+		*tr = (AST){
+			.ASTtype = type,
+			.flags = AF_NODE,
+			.length = c + 1
+		};
+		tr->data[c] = tl;
 		*tok = tmp;
 		return 1;
 	}
@@ -129,24 +135,33 @@ List(int (*of)(Token **, AST*), int type, Token **tok, AST *ast)
 }
 
 static int
-Sequence(int (*of)(Token**, AST*), int type, Token **tok, AST *ast)
+List(int (*of)(Token **, AST**), int type, Token **tok, AST **ast)
 {
-	AST tl, tr;
+	return List_(of, type, tok, ast, 0);
+}
+
+static int
+Sequence_(int (*of)(Token**, AST**), int type, Token **tok, AST **ast, int c)
+{
+	AST *tl, *tr;
 	Token *tmp = *tok;
 
 	if(of(&tmp, &tl)){
-		if(Sequence(of, type, &tmp, &tr)){
-			*ast = (AST){
-				type,
-				.left = copyAST(tl),
-				.right = copyAST(tr)
-			};
-
+		if(Sequence_(of, type, &tmp, &tr, c+1)){
+			tr->data[c] = tl;
+			*ast = tr;
 			*tok = tmp;
 			return 1;
 		}
 
-		*ast = tl;
+		tr = allocAST(c + 1);
+		*ast = tr;
+		*tr = (AST){
+			.ASTtype = type,
+			.flags = AF_NODE,
+			.length = c + 1
+		};
+		tr->data[c] = tl;
 		*tok = tmp;
 		return 1;
 	}
@@ -155,9 +170,15 @@ Sequence(int (*of)(Token**, AST*), int type, Token **tok, AST *ast)
 }
 
 static int
-Capsule(int (*of)(Token**, AST*), const int lrpair[2], Token **tok, AST *ast)
+Sequence(int (*of)(Token**, AST**), int type, Token **tok, AST **ast)
 {
-	AST tl;
+	return Sequence_(of, type, tok, ast, 0);
+}
+
+static int
+Capsule(int (*of)(Token**, AST**), const int lrpair[2], Token **tok, AST **ast)
+{
+	AST *tl;
 	Token *tmp = *tok;
 
 	if(scanToken(&tmp, lrpair[0]) && of(&tmp, &tl)){
@@ -166,16 +187,16 @@ Capsule(int (*of)(Token**, AST*), const int lrpair[2], Token **tok, AST *ast)
 			*tok = tmp;
 			return 1;
 		}
-		freeASTLeaves(&tl);
+		freeAST(tl);
 	}
 
 	return 0;
 }
 
 static int
-CapsuleWComma(int (*of)(Token**, AST*), const int lrpair[2], Token **tok, AST *ast)
+CapsuleWComma(int (*of)(Token**, AST**), const int lrpair[2], Token **tok, AST **ast)
 {
-	AST tl;
+	AST *tl;
 	Token *tmp = *tok;
 
 	if(scanToken(&tmp, lrpair[0]) && of(&tmp, &tl)){
@@ -185,7 +206,7 @@ CapsuleWComma(int (*of)(Token**, AST*), const int lrpair[2], Token **tok, AST *a
 			*tok = tmp;
 			return 1;
 		}
-		freeASTLeaves(&tl);
+		freeAST(tl);
 	}
 
 	return 0;
@@ -230,35 +251,39 @@ static const char* astName[] = {
 	"A_POINTER", "A_IDENTLIST", "A_PARAMLIST", "A_PARAMDECL", "A_PARAMTYPELIST", "A_DIRECTDECLARATOR", "A_QUALLIST",
 	"A_DIRECTABSTRACTDECL", "A_ABSTRACTDECLARATOR", "A_TYPENAME",
 	"A_LABELSTATEMENT", "A_FOR", "A_WHILE", "A_DOWHILE", "A_FORLIST", "A_BLOCK", "A_RETURN", "A_CONTINUE", "A_BREAK", "A_SWITCH", "A_GOTO", "A_IFELSE", "A_IF", "A_BLOCKLIST", "A_EMPTYSTATEMENT",
-	"A_DECLARATIONLIST", "A_FUNCDECL", "A_TRANSLATIONUNIT",
+	"A_DECLARATIONLIST", "A_FUNCDECL", "A_TRANSLATIONUNIT", "A_DVLA", "A_VLA", "A_EPL"
 };
 
 static void
 printAST_(AST *ast, int depth)
 {
-	for(int i = 0; i < depth; i++){
+	for(int i = 0; i < depth; i++)
 		printf("   ");
-	}
 
 	if(ast == NULL){
 		printf("%p\n", NULL);
 		return;
 	}
 	
-	if(ast->type == A_IDENT){
-		printf("(%.*s)\n", (int)(ast->end - ast->start), ast->start);
-		return;
+	switch(ast->flags){	
+		case AF_NODE:
+			printf("%s:\n", astName[ast->ASTtype]);
+			for(int i = 0; i < ast->length; i++)
+				printAST_((AST*)ast->data[i], depth + 1);
+			break;
+		case AF_STRNODE:
+			printf("%s:\n   ", astName[ast->ASTtype]);
+			for(int i = 0; i < depth; i++)
+				printf("   ");
+			printf("(%.*s)\n", (int)((char*)ast->data[1] - (char*)ast->data[0]), (char*)ast->data[0]);
+			break;
+		case AF_TOKNODE:
+			printf("%s:\n   ", astName[ast->ASTtype]);
+			for(int i = 0; i < depth; i++)
+				printf("   ");
+			printToken((Token*)ast->data[0]);
+			break;
 	}
-
-	if(ast->type == A_STORAGESPEC || ast->type == A_TYPESPEC || ast->type == A_TYPEQUAL || ast->type == A_FUNCSPEC || ast->type == A_INTLIT){
-		printf("(%lld)\n", ast->intValue);
-		return;
-	}
-
-	printf("%s:\n", astName[ast->type]);
-	printAST_(ast->left, depth + 1);
-	printAST_(ast->right, depth + 1);
-	
 }
 
 void
@@ -271,14 +296,16 @@ printAST(AST *ast)
 
 // iso c99 69
 static int
-identifier(Token **tok, AST *ast)
+identifier(Token **tok, AST **ast)
 {
 	Token *tmp = *tok;
 	if(scanToken(&tmp, T_IDENTIFIER)){
-		*ast = (AST){
-			A_IDENT,
-			.start = (*tok)->start,
-			.end = (*tok)->end
+		*ast = allocAST(2);
+		*(AST2*)*ast = (AST2){
+			.ASTtype = A_IDENT,
+			.flags = AF_STRNODE,
+			.length = 2,
+			.data = { (*tok)->start, (*tok)->end }
 		};
 
 		*tok = tmp;
@@ -290,7 +317,7 @@ identifier(Token **tok, AST *ast)
 
 // iso c99 69
 static int
-constant(Token **tok, AST *ast)
+constant(Token **tok, AST **ast)
 {
 	switch((*tok)->token){
 		case T_INTEGERCONST:
@@ -298,8 +325,14 @@ constant(Token **tok, AST *ast)
 		case T_CHARCONST:
 		case T_STRINGLIT:
 			//TODO deal with strings properly
-			ast->type = A_INTLIT;
-			ast->intValue = (*tok)->intValue;
+			*ast = allocAST(2);
+			*(AST2*)*ast = (AST2){
+				.ASTtype = A_INTLIT,
+				.length = 2,
+				.flags = AF_STRNODE,
+				.data = { (*tok)->start, (*tok)->end }
+			};
+			
 			*tok = (*tok)->next;
 			return 1;
 		break;
@@ -310,15 +343,17 @@ constant(Token **tok, AST *ast)
 
 // iso c99 69
 static int
-stringLit(Token **tok, AST *ast)
+stringLit(Token **tok, AST **ast)
 {
 	Token *tmp = *tok;
 	if(scanToken(&tmp, T_STRINGLIT)){
 		//TODO do escape sequences and whatnot (alredy implimented just need to make a string)
-		*ast = (AST){
-			A_STRLIT,
-			.start = (*tok)->start,
-			.end = (*tok)->end,
+		*ast = allocAST(2);
+		*(AST2*)*ast = (AST2){
+			.ASTtype = A_STRLIT,
+			.length = 2,
+			.flags = AF_STRNODE,
+			.data = { (*tok)->start, (*tok)->end }
 		};
 
 		*tok = tmp;
@@ -328,32 +363,32 @@ stringLit(Token **tok, AST *ast)
 	return 0;
 }
 
-static int expr(Token**, AST*);
+static int expr(Token**, AST**);
 
 // iso c99 69
 static int
-primaryExpr(Token **tok, AST *ast)
+primaryExpr(Token **tok, AST **ast)
 {
 	return identifier(tok, ast) || constant(tok, ast) || stringLit(tok, ast) || Capsule(expr, PAREN, tok, ast);
 }
 
-static int typeName(Token **, AST *);
-static int initializerList(Token **, AST *);
-static int assignmentExpr(Token **, AST *);
+static int typeName(Token **, AST **);
+static int initializerList(Token **, AST **);
+static int assignmentExpr(Token **, AST **);
 
 // iso c99 70
 static int
-argumentExprList(Token **tok, AST *ast)
+argumentExprList(Token **tok, AST **ast)
 {
 	return List(assignmentExpr, A_EXPRLIST, tok, ast);
 }
 
 // iso c99 69
 static int
-postfixExpr(Token **tok, AST *ast)
+postfixExpr(Token **tok, AST **ast)
 {
 
-	AST tl, tr;
+	AST *tl, *tr;
 	Token *tmp = *tok, *ttmp;
 	int type = -1;
 	
@@ -361,51 +396,30 @@ postfixExpr(Token **tok, AST *ast)
 
 	if(Capsule(typeName, PAREN, &ttmp, &tl)){
 		if(CapsuleWComma(initializerList, CURLY, &ttmp, &tr)){
-			*ast = (AST){
-				A_DESINIT,
-				.left = copyAST(tl),
-				.right = copyAST(tr)
-			};
-
+			*ast = initNode(A_DESINIT, tl, tr);
 			*tok = ttmp;
 			return 1;
 		}
-		freeASTLeaves(&tl);
+		freeAST(tl);
 	}
-	
+
 	if(primaryExpr(&tmp, &tl)){
 		while(1){
-			tl.left = copyAST(tl);
-			tl.right = NULL;
-
 			ttmp = tmp;
 			if(Capsule(expr, BRACE, &ttmp, &tr)){
-				tl = (AST){
-					A_DEREF,
-					.left = tl.left,
-					.right = copyAST(tr)
-				};
+				tl = initNode(A_DEREF, tl, tr);
 				tmp = ttmp;
 				continue;
 			}
 			
 			if(Capsule(argumentExprList, PAREN, &ttmp, &tr)){
-				tl = (AST){
-					A_CALL,
-					.left = tl.left,
-					.right = copyAST(tr)
-				};
-
+				tl = initNode(A_CALL, tl, tr);
 				tmp = ttmp;
 				continue;
 			}
 
 			if(scanToken(&ttmp, T_LPAREN) && scanToken(&ttmp, T_RPAREN)){
-				tl = (AST){
-					A_CALL,
-					.left = tl.left,
-					.right = NULL
-				};
+				tl = initUNode(A_CALL, tl);
 				tmp = ttmp;
 				continue;
 			}
@@ -418,11 +432,7 @@ postfixExpr(Token **tok, AST *ast)
 			ttmp = tmp->next;
 
 			if(type >= 0 && identifier(&ttmp, &tr)){
-				tl = (AST){
-					type,
-					.left = tl.left,
-					.right = copyAST(tr)
-				};
+				tl = initNode(type, tl, tr);
 				tmp = ttmp;
 				continue;
 			}
@@ -435,11 +445,7 @@ postfixExpr(Token **tok, AST *ast)
 			ttmp = tmp->next;
 
 			if(type >= 0){
-				tl = (AST){
-					type,
-					.left = tl.left,
-					.right = NULL
-				};
+				tl = initUNode(type, tl);
 				tmp = ttmp;
 				continue;
 			}
@@ -447,9 +453,7 @@ postfixExpr(Token **tok, AST *ast)
 			break;
 		}
 
-		*ast = *tl.left;
-		tl.left->left = tl.left->right = NULL;
-		freeAST(tl.left);
+		*ast = tl;
 		*tok = tmp;
 		return 1;
 	}
@@ -457,13 +461,13 @@ postfixExpr(Token **tok, AST *ast)
 	return 0;
 }
 
-static int castExpr(Token **, AST *);
+static int castExpr(Token **, AST **);
 
 // iso c99 78
 static int
-unaryExpr(Token **tok, AST *ast)
+unaryExpr(Token **tok, AST **ast)
 {
-	AST tl;
+	AST *tl;
 	Token *tmp = *tok, *ttmp;
 	int type = -1;
 
@@ -479,12 +483,7 @@ unaryExpr(Token **tok, AST *ast)
 		case T_SIZEOF:
 			ttmp = tmp->next;
 			if(unaryExpr(&ttmp, &tl) || Capsule(typeName, PAREN, &ttmp, &tl)){
-				*ast = (AST){
-					A_SIZEOF,
-					.left = copyAST(tl),
-					.right = NULL
-				};
-
+				*ast = initUNode(A_SIZEOF, tl);
 				*tok = ttmp;
 				return 1;
 			}
@@ -492,12 +491,7 @@ unaryExpr(Token **tok, AST *ast)
 
 	tmp = tmp->next;
 	if(type >= 0 && castExpr(&tmp, &tl)){
-		*ast = (AST){
-			type,
-			.left = copyAST(tl),
-			.right = NULL
-		};
-
+		*ast = initUNode(type, tl);
 		*tok = tmp;
 		return 1;
 	}
@@ -507,21 +501,17 @@ unaryExpr(Token **tok, AST *ast)
 
 // iso c99 78
 static int
-castExpr(Token **tok, AST *ast){
-	AST tl, tr;
+castExpr(Token **tok, AST **ast){
+	AST *tl, *tr;
 	Token *tmp = *tok;
 
 	if(Capsule(typeName, PAREN, &tmp, &tl)){
 		if(castExpr(&tmp, &tr)){
-			*ast = (AST){
-				A_CAST,
-				.left = copyAST(tl),
-				.right = copyAST(tr)
-			};
+			*ast = initNode(A_CAST, tl, tr);
 			*tok = tmp;
 			return 1;
 		}
-		freeASTLeaves(&tl);
+		freeAST(tl);
 	}	
 
 	return unaryExpr(tok, ast);
@@ -542,7 +532,7 @@ mulOper(int token)
 
 // iso c99 82
 static int
-mulExpr(Token **tok, AST *ast)
+mulExpr(Token **tok, AST **ast)
 {
 	return binExpr(castExpr, mulOper, tok, ast);
 }
@@ -561,7 +551,7 @@ addOper(int token)
 
 // iso c99 82
 static int
-addExpr(Token **tok, AST *ast)
+addExpr(Token **tok, AST **ast)
 {
 	return binExpr(mulExpr, addOper, tok, ast);
 }
@@ -580,7 +570,7 @@ shiftOper(int token)
 
 // iso c99 84
 static int
-shiftExpr(Token **tok, AST *ast)
+shiftExpr(Token **tok, AST **ast)
 {
 	return binExpr(addExpr, shiftOper, tok, ast);
 }
@@ -600,7 +590,7 @@ relOper(int token)
 }
 // iso c99 85
 static int
-relExpr(Token **tok, AST *ast)
+relExpr(Token **tok, AST **ast)
 {
 	return binExpr(shiftExpr, relOper, tok, ast);
 }
@@ -618,7 +608,7 @@ eqOper(int token)
 }
 // iso c99 86
 static int
-eqExpr(Token **tok, AST *ast)
+eqExpr(Token **tok, AST **ast)
 {
 	return binExpr(relExpr, eqOper, tok, ast);
 }
@@ -635,7 +625,7 @@ andOper(int token)
 }
 // iso c99 87
 static int
-andExpr(Token **tok, AST *ast)
+andExpr(Token **tok, AST **ast)
 {
 	return binExpr(eqExpr, andOper, tok, ast);
 }
@@ -652,7 +642,7 @@ xorOper(int token)
 }
 // iso c99 88
 static int
-xorExpr(Token **tok, AST *ast)
+xorExpr(Token **tok, AST **ast)
 {
 	return binExpr(andExpr, xorOper, tok, ast);
 }
@@ -669,7 +659,7 @@ orOper(int token)
 }
 // iso c99 88
 static int
-orExpr(Token **tok, AST *ast)
+orExpr(Token **tok, AST **ast)
 {
 	return binExpr(xorExpr, orOper, tok, ast);
 }
@@ -688,7 +678,7 @@ bandOper(int token)
 
 // iso c99 89
 static int
-bandExpr(Token **tok, AST *ast)
+bandExpr(Token **tok, AST **ast)
 {
 	return binExpr(orExpr, bandOper, tok, ast);
 }
@@ -706,37 +696,28 @@ borOper(int token)
 
 // iso c99 89
 static int 
-borExpr(Token **tok, AST *ast)
+borExpr(Token **tok, AST **ast)
 {
 	return binExpr(bandExpr, borOper, tok, ast);
 }
 
 // iso c99 90
 static int
-elvisExpr(Token **tok, AST *ast)
+elvisExpr(Token **tok, AST **ast)
 {
 	static const int lrpair[] = {T_QMARK, T_COLON};
-	AST tl, tm, tr;
+	AST *tl, *tm, *tr;
 	Token *tmp = *tok;
 
 	if(borExpr(&tmp, &tl)){
 		Token *ttmp = tmp;
 		if(Capsule(expr, lrpair, &ttmp, &tm)){
 			if(elvisExpr(&ttmp, &tr)){
-				*ast = (AST){
-					A_COND,
-					.left = copyAST(tl),
-					.right = copyAST((AST){
-						A_CONDRES,
-						.left = copyAST(tm),
-						.right = copyAST(tr)
-					})
-				};
-
+				*ast = initNode(A_COND, tl, initNode(A_CONDRES, tm, tr));
 				*tok = ttmp;
 				return 1;
 			}
-			freeASTLeaves(&tm);
+			freeAST(tm);
 		}
 
 		*tok = tmp;
@@ -769,9 +750,9 @@ assignmentOper(int token){
 
 // iso c99 91
 static int
-assignmentExpr(Token **tok, AST *ast)
+assignmentExpr(Token **tok, AST **ast)
 {
-	AST tl, tr;
+	AST *tl, *tr;
 	Token *tmp = *tok;
 	int type;
 
@@ -780,36 +761,30 @@ assignmentExpr(Token **tok, AST *ast)
 		tmp = tmp->next;
 
 		if(type >= 0 && assignmentExpr(&tmp, &tr)){
-			*ast = (AST){
-				type,
-				.left = copyAST(tl),
-				.right = copyAST(tr)
-			};
-
+			*ast = initNode(type, tl, tr);
 			*tok = tmp;
 			return 1;
 		}
 		
-		freeASTLeaves(&tl);
+		freeAST(tl);
 	}
 
-	
 	return elvisExpr(tok, ast);
 }
 
 // iso c99 94 
 static int
-expr(Token **tok, AST *ast)
+expr(Token **tok, AST **ast)
 {
 	return List(assignmentExpr, A_EXPRLIST, tok, ast);
 }
 
-static int qualifierList(Token **, AST *);
+static int qualifierList(Token **, AST **);
 
 static int
-pointerEntry(Token **tok, AST *ast)
+pointerEntry(Token **tok, AST **ast)
 {
-	AST tl;
+	AST *tl;
 	Token *tmp = *tok;
 
 	if(scanToken(&tmp, T_STAR)){
@@ -819,10 +794,8 @@ pointerEntry(Token **tok, AST *ast)
 			return 1;
 		}
 
-		*ast = (AST){
-			A_TYPEQUAL,
-			.intValue = -1
-		};
+		//TODO not null
+		*ast = initUNode(A_TYPEQUAL, NULL);
 		*tok = tmp;
 		return 1;
 	}
@@ -833,61 +806,67 @@ pointerEntry(Token **tok, AST *ast)
 
 // iso c99 114
 static int
-pointer(Token **tok, AST *ast)
+pointer(Token **tok, AST **ast)
 {
 	return Sequence(pointerEntry, A_POINTER, tok, ast);	
 }
 
 // iso c99 114
 static int
-identifierList(Token **tok, AST *ast)
+identifierList(Token **tok, AST **ast)
 {
 	return List(identifier, A_IDENTLIST, tok, ast);
 }
 
-static int declarationSpecifiers(Token **, AST *);
-static int declarator(Token **, AST *);
-static int abstractDeclarator(Token **, AST *);
-static int paramTypeList(Token **, AST *);
+static int declarationSpecifiers(Token **, AST **);
+static int declarator(Token **, AST **);
+static int abstractDeclarator(Token **, AST **);
+static int paramTypeList(Token **, AST **);
+
+static int
+directAbstractSequence(Token **tok, AST **ast)
+{
+	Token *tmp = *tok;
+
+	if(scanToken(&tmp, T_RBRACE) && scanToken(&tmp, T_STAR) && scanToken(&tmp, T_RBRACE)){
+		*ast = initUNode(A_DVLA, NULL);
+		*tok = tmp;	
+		return 1;
+	}
+
+	tmp = *tok;
+	if(scanToken(&tmp, T_LBRACE) && scanToken(&tmp, T_RBRACE)){
+		//TODO better asttype
+		*ast = initUNode(A_VLA, NULL);
+		*tok = tmp;	
+		return 1;
+	}
+
+	tmp = *tok;
+	if(scanToken(&tmp, T_LPAREN) && scanToken(&tmp, T_RPAREN)){
+		*ast = initUNode(A_EPL, NULL);
+		*tok = tmp;	
+		return 1;
+	}
+
+	
+	return Capsule(assignmentExpr, BRACE, tok, ast) || Capsule(paramTypeList, PAREN, tok, ast);
+
+}
 
 // iso c99 122
 static int
-directAbstractDeclarator(Token **tok, AST *ast)
+directAbstractDeclarator(Token **tok, AST **ast)
 {
-	AST tl = (AST){0}, tr;
+	AST *tl = NULL, *tr = NULL;
 	Token *tmp = *tok, *ttmp;
-	
-	if(!Capsule(abstractDeclarator, PAREN, &tmp, &tl))
-		goto st;
+	printf("\nhi\n");
 
-	while(1){
-		tl.left = copyAST(tl);
-		tl.right = NULL;
-		tl.type = A_DIRECTABSTRACTDECL;
-	st:
-		ttmp = tmp;
-	
-		if(Capsule(assignmentExpr, BRACE, &ttmp, &tr) || Capsule(paramTypeList, PAREN, &ttmp, &tr)){
-			tl.right = copyAST(tr);
-			tmp = ttmp;
-			continue;
-		}
+	Capsule(abstractDeclarator, PAREN, &tmp, &tl);
+	Sequence(directAbstractSequence, A_DIRECTABSTRACTDECL, &tmp, &tr);
 
-		//variable length array int (*)[*] iso c99 122
-		if(scanToken(&ttmp, T_RBRACE) && scanToken(&ttmp, T_STAR) && scanToken(&ttmp, T_RBRACE)){
-			tl.right = NULL;
-			tmp = ttmp;
-			continue;
-		}
-
-		break;
-
-	}
-
-	if(tl.type == A_DIRECTABSTRACTDECL){
-		*ast = *tl.left;
-		tl.left->left = tl.left->right = NULL;
-		
+	if(tl || tr){
+		*ast = initNode(A_DIRECTABSTRACTDECL, tl, tr);
 		*tok = tmp;
 		return 1;
 	}
@@ -895,25 +874,20 @@ directAbstractDeclarator(Token **tok, AST *ast)
 	return 0;
 }
 
-static int pointer(Token **,  AST *);
+static int pointer(Token **,  AST **);
 
 // iso c99 122
 static int
-abstractDeclarator(Token **tok, AST *ast)
+abstractDeclarator(Token **tok, AST **ast)
 {
-	AST tl, tr;
+	AST *tl, *tr;
 	Token *tmp = *tok;
 
 	int opt = pointer(&tmp, &tl);
 
 	if(directAbstractDeclarator(&tmp, &tr)){
 		if(opt){
-			*ast = (AST){
-				A_ABSTRACTDECLARATOR,
-				.left = copyAST(tl),
-				.right = copyAST(tr)
-			};
-			
+			*ast = initNode(A_ABSTRACTDECLARATOR, tl, tr);
 			*tok = tmp;
 			return 1;
 		}
@@ -932,24 +906,19 @@ abstractDeclarator(Token **tok, AST *ast)
 	return 0;
 }
 
-static int specifierQualifierList(Token **, AST *);
+static int specifierQualifierList(Token **, AST **);
 
 // iso c99 122
 static int
-typeName(Token **tok, AST *ast)
+typeName(Token **tok, AST **ast)
 {
-	AST tl, tr;
+	AST *tl, *tr = NULL;
 	Token *tmp = *tok;
 
 	if(specifierQualifierList(&tmp, &tl)){
 		int opt = abstractDeclarator(&tmp, &tr);
 
-		*ast = (AST){
-			A_TYPENAME,
-			.left = copyAST(tl),
-			.right = opt ? copyAST(tr) : NULL
-		};
-
+		*ast = initNode(A_TYPENAME, tl, tr);
 		*tok = tmp;
 		return 1;
 	}
@@ -959,19 +928,14 @@ typeName(Token **tok, AST *ast)
 
 // iso c99 114
 static int
-paramDecl(Token **tok, AST *ast)
+paramDecl(Token **tok, AST **ast)
 {
-	AST tl, tr;
+	AST *tl, *tr;
 	Token *tmp = *tok;
 
 	if(declarationSpecifiers(&tmp, &tl)){
 		if(declarator(&tmp, &tr) || abstractDeclarator(&tmp, &tr)){
-			*ast = (AST){
-				A_PARAMDECL,
-				.left = copyAST(tl),
-				.right = copyAST(tr)
-			};
-
+			*ast = initNode(A_PARAMDECL, tl, tr);
 			*tok = tmp;
 			return 1;
 		}
@@ -986,146 +950,112 @@ paramDecl(Token **tok, AST *ast)
 
 // iso c99 114
 static int
-paramList(Token **tok, AST *ast)
+paramList(Token **tok, AST **ast)
 {
 	return List(paramDecl, A_PARAMLIST, tok, ast);
 }
 
 // iso c99 114
 static int
-paramTypeList(Token **tok, AST *ast)
+paramTypeList(Token **tok, AST **ast)
 {
 	return List(paramList, A_PARAMTYPELIST, tok, ast);
 }
 
-static int typeQualifier(Token **, AST *);
+static int typeQualifier(Token **, AST **);
 // iso c99 114
 static int
-typeQualifierList(Token **tok, AST *ast){
+typeQualifierList(Token **tok, AST **ast){
 	return Sequence(typeQualifier, A_QUALLIST, tok, ast);
 }
 
-// iso c99 114
 static int
-directDeclarator(Token **tok, AST *ast)
+directSequence(Token **tok, AST **ast)
 {
-	AST tl, tm, tr;
+	AST *tl, *tm, *tr;
 	Token *tmp = *tok;
 
-	if(!identifier(&tmp, &tl) && !Capsule(declarator, PAREN, &tmp, &tl))
-		return 0;
-
-	while(1){
-		Token *ttmp = tmp;
-		tl.left = copyAST(tl);
-		tl.right = NULL;
-		tl.type = A_DIRECTDECLARATOR;
-		
-		if(Capsule(paramTypeList, PAREN, &ttmp, &tr) || Capsule(identifierList, PAREN, &ttmp, &tr)){
-			tl.right = copyAST(tr);
-			tmp = ttmp;
-			continue;
-		}
-
-		if(scanToken(&ttmp, T_LPAREN) && scanToken(&ttmp, T_RPAREN)){
-			tl.right = NULL;
-			tmp = ttmp;
-			continue;
-		}
-
-		ttmp = tmp;
-		if(scanToken(&ttmp, T_LBRACE)){
-			int opt = typeQualifierList(&ttmp, &tm);
-			if(scanToken(&ttmp, T_STAR) && scanToken(&ttmp, T_RBRACE)){
-				//TODO less jank
-				tl.right = copyAST((AST){
-					A_DIRECTDECLARATOR,
-					.left = opt ? copyAST(tm) : NULL,
-					.right = NULL
-				});
-
-				tmp = ttmp;
-				continue;
-			} 
-
-			if(opt)
-				freeASTLeaves(&tm);
-		}
-
-		ttmp = tmp;
-		if(scanToken(&ttmp, T_LBRACE)){
-			int opt = typeQualifierList(&ttmp, &tm);
-			int opt1 = assignmentExpr(&ttmp, &tr);
-			if(scanToken(&ttmp, T_RBRACE)){
-				tl.right = copyAST((AST){
-					A_DIRECTDECLARATOR,
-					.left = opt ? copyAST(tm) : NULL,
-					.right = opt1 ? copyAST(tr) : NULL,
-				});
-
-				tmp = ttmp;
-				continue;
-			}
-			if(opt)
-				freeASTLeaves(&tm);
-			if(opt1)
-				freeASTLeaves(&tr);
-		}
-
-		ttmp = tmp;
-		if(scanToken(&ttmp, T_LBRACE)){
-			int opt = scanToken(&ttmp, T_STATIC);
-			if(typeQualifierList(&ttmp, &tm)){
-				if((opt || scanToken(&ttmp, T_STATIC)) && assignmentExpr(&ttmp, &tr)){
-					tl.right = copyAST((AST){
-						A_DIRECTDECLARATOR,
-						.left = copyAST(tm),
-						.right = copyAST(tr)		
-					});
-
-					tmp = ttmp;
-					continue;
-				}
-				freeASTLeaves(&tm);
-			}else if(opt && assignmentExpr(&ttmp, &tr)){
-				tl.right = copyAST((AST){
-					A_DIRECTDECLARATOR,
-					.left = NULL,
-					.right = copyAST(tr)		
-				});
-
-				tmp = ttmp;
-				continue;
-			}
-		}
-
-		break;
+	if(scanToken(&tmp, T_LPAREN) && scanToken(&tmp, T_RPAREN)){
+		*ast = initUNode(A_VLA, NULL);
+		*tok = tmp;
+		return 1;
 	}
 
-	*ast = *tl.left;
-	tl.left->left = tl.left->right = NULL;
-	freeAST(tl.left);
+	tmp = *tok;
+	if(scanToken(&tmp, T_LBRACE)){
+		int opt = typeQualifierList(&tmp, &tm);
+		if(scanToken(&tmp, T_STAR) && scanToken(&tmp, T_RBRACE)){
+			//TODO less jank
+			tl = initNode(A_DIRECTDECLARATOR, opt ? tm : NULL, NULL);
+			*tok = tmp;
+			return 1;
+		} 
 
-	*tok = tmp;
-	return 1;
+		if(opt)
+			freeAST(tm);
+	}
+
+	tmp = *tok;
+	if(scanToken(&tmp, T_LBRACE)){
+		int opt = typeQualifierList(&tmp, &tm);
+		int opt1 = assignmentExpr(&tmp, &tr);
+		if(scanToken(&tmp, T_RBRACE)){
+			tl = initNode(A_DIRECTDECLARATOR, tl, initNode(A_DIRECTDECLARATOR, opt ? tm : NULL, opt1 ? tr : NULL));
+			*tok = tmp;
+			return 1;
+		}
+		if(opt)
+			freeAST(tm);
+		if(opt1)
+			freeAST(tr);
+	}
+
+	tmp = *tok;
+	if(scanToken(&tmp, T_LBRACE)){
+		int opt = scanToken(&tmp, T_STATIC);
+		if(typeQualifierList(&tmp, &tm)){
+			if((opt || scanToken(&tmp, T_STATIC)) && assignmentExpr(&tmp, &tr)){
+				tl = initNode(A_DIRECTDECLARATOR, tl, initNode(A_DIRECTDECLARATOR, tm, tr));
+				*tok = tmp;
+				return 1;
+			}
+			freeAST(tm);
+		}else if(opt && assignmentExpr(&tmp, &tr)){
+			tl = initNode(A_DIRECTDECLARATOR, tl, tr);
+			*tok = tmp;
+			return 1;
+		}
+	}
+	
+	return Capsule(paramTypeList, PAREN, tok, ast) || Capsule(identifierList, PAREN, tok, ast);
 }
 
 // iso c99 114
 static int
-declarator(Token **tok, AST *ast)
+directDeclarator(Token **tok, AST **ast)
 {
-	AST tl, tr;
+	AST *tl = NULL, *tr = NULL;
+
+	if(identifier(tok, &tl) || Capsule(declarator, PAREN, tok, &tl)){
+		Sequence(directSequence, A_DIRECTDECLARATOR, tok, &tr);
+		*ast = initNode(A_DIRECTDECLARATOR, tl, tr);
+		return 1;
+	}
+	
+	return 0;
+}
+
+// iso c99 114
+static int
+declarator(Token **tok, AST **ast)
+{
+	AST *tl, *tr;
 	Token *tmp = *tok;
 	int opt = pointer(&tmp, &tl);
 
 	if(directDeclarator(&tmp, &tr)){
 		if(opt){
-			*ast = (AST){
-				A_DECLARATOR,
-				.left = copyAST(tl),
-				.right = copyAST(tr)
-			};
-
+			*ast = initNode(A_DECLARATOR, tl, tr);
 			*tok = tmp;
 			return 1;
 		}
@@ -1140,19 +1070,14 @@ declarator(Token **tok, AST *ast)
 
 // iso c99 125
 static int
-designator(Token **tok, AST *ast)
+designator(Token **tok, AST **ast)
 {
-	AST tl;
+	AST *tl;
 	Token *tmp = *tok;
 
 	//constexpr
 	if(Capsule(elvisExpr, BRACE, &tmp, &tl) || (scanToken(&tmp, T_DOT) && identifier(&tmp, &tl))){
-		*ast = (AST){
-			A_DESIGNATOR,
-			.left = copyAST(tl),
-			.right = NULL
-		};
-
+		*ast = initUNode(A_DESIGNATOR, tl);
 		*tok = tmp;
 		return 1;
 	}
@@ -1162,14 +1087,14 @@ designator(Token **tok, AST *ast)
 
 // iso c99 125
 static int
-designatorList(Token **tok, AST *ast)
+designatorList(Token **tok, AST **ast)
 {
 	return List(designator, A_DESIGNATORLIST, tok, ast);
 }
 
 // iso c99 125
 static int
-designation(Token **tok, AST *ast)
+designation(Token **tok, AST **ast)
 {
 	Token *tmp = *tok;
 
@@ -1178,18 +1103,18 @@ designation(Token **tok, AST *ast)
 			*tok = tmp;
 			return 1;
 		}
-		freeASTLeaves(ast);
+		freeAST(*ast);
 	}
 
 	return 0;
 }
 
-static int initializer(Token **tok, AST *ast);
+static int initializer(Token **tok, AST **ast);
 
 static int
-initializerEntry(Token **tok, AST *ast)
+initializerEntry(Token **tok, AST **ast)
 {
-	AST tl, tr;
+	AST *tl, *tr;
 	Token *tmp = *tok;
 	int opt = designation(&tmp, &tl);
 
@@ -1197,7 +1122,8 @@ initializerEntry(Token **tok, AST *ast)
 		*tok = tmp;
 		if(opt){
 			*ast = tl;
-			ast->right = copyAST(tr);
+			//TODO less jank
+			(*ast)->data[1] = tr;
 			return 1;
 		}
 
@@ -1210,33 +1136,28 @@ initializerEntry(Token **tok, AST *ast)
 
 // iso c99 125
 static int
-initializerList(Token **tok, AST *ast)
+initializerList(Token **tok, AST **ast)
 {
 	return List(initializerEntry, A_INITLIST, tok, ast);
 }
 
 // iso c99 125
 static int
-initializer(Token **tok, AST *ast)
+initializer(Token **tok, AST **ast)
 {
 	return assignmentExpr(tok, ast) || CapsuleWComma(initializerList, CURLY, tok, ast);
 }
 
 // iso c99 97
 static int
-initDeclarator(Token **tok, AST *ast)
+initDeclarator(Token **tok, AST **ast)
 {
-	AST tl, tr;
+	AST *tl, *tr;
 	Token *tmp = *tok;
 	if(declarator(&tmp, &tl)){
 		Token *ttmp = tmp;
 		if(scanToken(&ttmp, T_EQ) && initializer(&ttmp, &tr)){
-			*ast = (AST){
-				A_INITIALIZER,
-				.left = copyAST(tl),
-				.right = copyAST(tr)
-			};
-
+			*ast = initNode(A_INITIALIZER, tl, tr);
 			*tok = ttmp;
 			return 1;
 		}
@@ -1251,14 +1172,14 @@ initDeclarator(Token **tok, AST *ast)
 
 // iso c99 97
 static int
-initDeclaratorList(Token **tok, AST *ast)
+initDeclaratorList(Token **tok, AST **ast)
 {
 	return List(initDeclarator, A_INITLIST, tok, ast);
 }
 
 // iso c99 98
 static int
-storageClassSpecifier(Token **tok, AST *ast)
+storageClassSpecifier(Token **tok, AST **ast)
 {
 	Token *tmp = *tok;
 	
@@ -1268,10 +1189,9 @@ storageClassSpecifier(Token **tok, AST *ast)
 		case T_STATIC:
 		case T_AUTO:
 		case T_REGISTER:
-			*ast = (AST){
-				A_STORAGESPEC,
-				.intValue = tmp->token
-			};
+			//TODO not null
+			*ast = initUNode(A_STORAGESPEC, NULL);
+			//	.intValue = tmp->token
 			tmp = tmp->next;
 			*tok = tmp;
 			return 1;
@@ -1280,45 +1200,40 @@ storageClassSpecifier(Token **tok, AST *ast)
 	return 0;
 }
 
-static int typeSpecifier(Token **, AST *);
-static int typeQualifier(Token **, AST *);
+static int typeSpecifier(Token **, AST **);
+static int typeQualifier(Token **, AST **);
 
 static int
-specifierQualifierEntry(Token **tok, AST *ast){
+specifierQualifierEntry(Token **tok, AST **ast){
 	return typeSpecifier(tok, ast) || typeQualifier(tok, ast);
 }
 
 // iso c99 101
 static int
-specifierQualifierList(Token **tok, AST *ast)
+specifierQualifierList(Token **tok, AST **ast)
 {
 	return Sequence(specifierQualifierEntry, A_SPECQUALLIST, tok, ast);
 }
 
 // iso c99 114
 static int
-qualifierList(Token **tok, AST *ast)
+qualifierList(Token **tok, AST **ast)
 {
 	return Sequence(typeQualifier, A_QUALLIST, tok, ast);
 }
 
 // iso c99 101
 static int
-structDeclarator(Token **tok, AST *ast)
+structDeclarator(Token **tok, AST **ast)
 {
-	AST tl, tr;
+	AST *tl, *tr;
 	Token *tmp = *tok;
 	int opt = declarator(&tmp, &tl);
 
 	Token *ttmp = tmp;
 	//constexpr
 	if(scanToken(&ttmp, T_COLON) && elvisExpr(&ttmp, &tr)){
-		*ast = (AST){
-			A_STRUCTDECLR,
-			.left = opt ? copyAST(tl) : NULL,
-			.right = copyAST(tr)
-		};
-
+		*ast = initNode(A_STRUCTDECLR, opt ? tl : NULL, tr);
 		*tok = ttmp;
 		return 1;
 	}
@@ -1334,48 +1249,43 @@ structDeclarator(Token **tok, AST *ast)
 
 // iso c99 101
 static int
-structDeclaratorList(Token **tok, AST *ast)
+structDeclaratorList(Token **tok, AST **ast)
 {
 	return List(structDeclarator, A_STRUCTDECLLIST, tok, ast);
 }
 
 // iso c99 101
 static int
-structDeclaration(Token **tok, AST *ast)
+structDeclaration(Token **tok, AST **ast)
 {
-	AST tl, tr;
+	AST *tl, *tr;
 	Token *tmp = *tok;
 
 	if(specifierQualifierList(&tmp, &tl)){
 		if(structDeclaratorList(&tmp, &tr)){
 			if(scanToken(&tmp, T_SEMI)){
-				*ast = (AST){
-					A_STRUCTDECL,
-					.left = copyAST(tl),
-					.right = copyAST(tr)
-				};
-
+				*ast = initNode(A_STRUCTDECL, tl, tr);
 				*tok = tmp;
 				return 1;	
 			}
-			freeASTLeaves(&tr);
+			freeAST(tr);
 		}
-		freeASTLeaves(&tl);
+		freeAST(tl);
 	}
 	return 0;
 }
 
 // iso c99 101
 static int
-structDeclarationList(Token **tok, AST *ast){
+structDeclarationList(Token **tok, AST **ast){
 	return Sequence(structDeclaration, A_STRUCTDECLLIST, tok, ast);
 }
 
 // iso c99 101
 static int
-structOrUnionSpecifier(Token **tok, AST *ast)
+structOrUnionSpecifier(Token **tok, AST **ast)
 {
-	AST tl, tr;
+	AST *tl, *tr;
 	Token *tmp = *tok;
 	int type = -1;
 
@@ -1388,22 +1298,13 @@ structOrUnionSpecifier(Token **tok, AST *ast)
 	if(type >= 0){
 		int opt = identifier(&tmp, &tl);
 		if(Capsule(structDeclarationList, CURLY, &tmp, &tr)){
-			*ast = (AST){
-				type,
-				.left = opt ? copyAST(tl) : NULL,
-				.right = copyAST(tr)
-			};
-
+			*ast = initNode(type, opt ? tl : NULL, tr);
 			*tok = tmp;
 			return 1;
 		}
 
 		if(opt){
-			*ast = (AST){
-				type,
-				.left = copyAST(tl),
-				.right = NULL
-			};
+			*ast = initUNode(type, tl);
 			*tok = tmp;
 			return 1;
 		}
@@ -1413,9 +1314,9 @@ structOrUnionSpecifier(Token **tok, AST *ast)
 
 // iso c99 105
 static int
-enumerator(Token **tok, AST *ast)
+enumerator(Token **tok, AST **ast)
 {
-	AST tl, tr;
+	AST *tl, *tr;
 	Token *tmp = *tok;
 
 	//enumconst
@@ -1423,12 +1324,7 @@ enumerator(Token **tok, AST *ast)
 		Token *ttmp = tmp;
 		//constexpr
 		if(scanToken(&ttmp, T_EQ) && elvisExpr(&ttmp, &tr)){
-			*ast = (AST){
-				A_ENUMERATOR,
-				.left = copyAST(tl),
-				.right = copyAST(tr)
-			};
-
+			*ast = initNode(A_ENUMERATOR, tl, tr);
 			*tok = ttmp;
 			return 1;
 		}
@@ -1443,39 +1339,29 @@ enumerator(Token **tok, AST *ast)
 
 // iso c99 104
 static int
-enumeratorList(Token **tok, AST *ast)
+enumeratorList(Token **tok, AST **ast)
 {
 	return List(enumerator, A_ENUMLIST, tok, ast);
 }
 
 // iso c99 104
 static int
-enumSpecifier(Token **tok, AST *ast)
+enumSpecifier(Token **tok, AST **ast)
 {
-	AST tl, tr;
+	AST *tl, *tr;
 	Token *tmp = *tok;
 
 	if(scanToken(&tmp, T_ENUM)){
 		int opt = identifier(&tmp, &tl);
 		
 		if(CapsuleWComma(enumeratorList, CURLY, &tmp, &tr)){
-			*ast = (AST){
-				A_ENUMSPEC,
-				.left = opt ? copyAST(tl) : NULL,
-				.right = copyAST(tr)
-			};
-
+			*ast = initNode(A_ENUMSPEC, opt ? tl : NULL, tr);
 			*tok = tmp;
 			return 1;
 		}
 
 		if(opt){
-			*ast = (AST){
-				A_ENUMSPEC,
-				.left = copyAST(tl),
-				.right = NULL
-			};
-
+			*ast = initUNode(A_ENUMSPEC, tl);
 			*tok = tmp;
 			return 1;
 		}
@@ -1487,7 +1373,7 @@ enumSpecifier(Token **tok, AST *ast)
 
 // iso c99 99
 static int
-typedefName(Token **tok, AST *ast){
+typedefName(Token **tok, AST **ast){
 	//TODO verify name
 	
 	return 0;
@@ -1496,7 +1382,7 @@ typedefName(Token **tok, AST *ast){
 
 // iso c99 99
 static int
-typeSpecifier(Token **tok, AST *ast)
+typeSpecifier(Token **tok, AST **ast)
 {
 	Token *tmp = *tok;
 
@@ -1513,10 +1399,9 @@ typeSpecifier(Token **tok, AST *ast)
 		case T_BOOL:
 		case T_COMPLEX:
 		case T_IMAGINARY:
-			*ast = (AST){
-				A_TYPESPEC,
-				.intValue = tmp->token
-			};
+			//TODO not null
+			*ast = initUNode(A_TYPESPEC, NULL);
+			//	.intValue = tmp->token
 			tmp = tmp->next;
 			*tok = tmp;	
 			return 1;
@@ -1527,7 +1412,7 @@ typeSpecifier(Token **tok, AST *ast)
 
 // iso c99 97
 static int
-typeQualifier(Token **tok, AST *ast)
+typeQualifier(Token **tok, AST **ast)
 {
 	Token *tmp = *tok;
 
@@ -1535,11 +1420,9 @@ typeQualifier(Token **tok, AST *ast)
 		case T_CONST:
 		case T_RESTRICT:
 		case T_VOLATILE:
-			*ast = (AST){
-				A_TYPEQUAL,
-				.intValue = tmp->token
-			};
-
+			//TODO not null
+			*ast = initUNode(A_TYPEQUAL, NULL);
+			//	.intValue = tmp->token
 			tmp = tmp->next;
 			*tok = tmp;
 			return 1;	
@@ -1550,16 +1433,14 @@ typeQualifier(Token **tok, AST *ast)
 
 // iso c99 97
 static int
-functionSpecifier(Token **tok, AST *ast)
+functionSpecifier(Token **tok, AST **ast)
 {
 	Token *tmp = *tok;
 	
 	if(scanToken(&tmp, T_INLINE)){
-		*ast = (AST){
-			A_FUNCSPEC,
-			.intValue = (*tok)->token
-		};
-
+		//TODO not null
+		*ast = initUNode(A_FUNCSPEC, NULL);
+		//	.intValue = (*tok)->token
 		*tok = tmp;
 		return 1;
 	}
@@ -1568,96 +1449,71 @@ functionSpecifier(Token **tok, AST *ast)
 }
 
 static int
-declarationSpecifier(Token **tok, AST *ast)
+declarationSpecifier(Token **tok, AST **ast)
 {
 	return storageClassSpecifier(tok, ast) || typeSpecifier(tok, ast) || typeQualifier(tok, ast) || functionSpecifier(tok, ast);
 }
 
 // iso c99 97
 static int
-declarationSpecifiers(Token **tok, AST *ast)
+declarationSpecifiers(Token **tok, AST **ast)
 {
 	return Sequence(declarationSpecifier, A_DECLSPECLIST, tok, ast);
 }
 
 // iso c99 97
 static int
-declaration(Token **tok, AST *ast)
+declaration(Token **tok, AST **ast)
 {
-	AST tl, tr;
+	AST *tl, *tr;
 	Token *tmp = *tok;
 
 	if(declarationSpecifiers(&tmp, &tl)){
 		int res = initDeclaratorList(&tmp, &tr);
 		if(scanToken(&tmp, T_SEMI)){
-			*ast = (AST){
-				A_DECLARATION,
-				.left = res ? copyAST(tr) : NULL,
-				.right = copyAST(tl)
-			};
-
+			*ast = initNode(A_DECLARATION, res ? tr : NULL, tl);
 			*tok = tmp;
 			return 1;
 		}
 		if(res)
-			freeASTLeaves(&tr);
-		freeASTLeaves(&tl);
+			freeAST(tr);
+		freeAST(tl);
 	}
 	return 0;
 
 }
 
-static int statement(Token **, AST *);
+static int statement(Token **, AST **);
 
 // iso c99 136
 static int
-jumpStatement(Token **tok, AST *ast)
+jumpStatement(Token **tok, AST **ast)
 {
 	static const int LRGOTO[] = {T_GOTO, T_SEMI}, LRRETURN[] = {T_RETURN, T_SEMI};
-	AST tl;
+	AST *tl;
 	Token *tmp = *tok;
 
 	if(Capsule(identifier, LRGOTO, &tmp, &tl)){
-		*ast = (AST){
-			A_GOTO,
-			.left = copyAST(tl),
-			.right = NULL
-		};
-
+		*ast = initUNode(A_GOTO, tl);
 		*tok = tmp;
 		return 1;
 	}
 
 	if(Capsule(expr, LRRETURN, &tmp, &tl)){
-		*ast = (AST){
-			A_RETURN,
-			.left = copyAST(tl),
-			.right = NULL
-		};
-
+		*ast = initUNode(A_RETURN, tl);
 		*tok = tmp;
 		return 1;
 	}
 
 	if(scanToken(&tmp, T_CONTINUE) && scanToken(&tmp, T_SEMI)){
-		*ast = (AST){
-			A_CONTINUE,
-			.left = NULL,
-			.right = NULL
-		};
-
+		*ast = initUNode(A_CONTINUE, NULL);
 		*tok = tmp;
 		return 1;
 	}
 
 	tmp = *tok;
 	if(scanToken(&tmp, T_BREAK) && scanToken(&tmp, T_SEMI)){
-		*ast = (AST){
-			A_BREAK,
-			.left = NULL,
-			.right = NULL
-		};
-
+		*ast = initUNode(A_BREAK, NULL);
 		*tok = tmp;
 		return 1;
 	}
@@ -1666,8 +1522,8 @@ jumpStatement(Token **tok, AST *ast)
 }
 
 static int
-forList(Token **tok, AST *ast){
-	AST tl, tm, tr;
+forList(Token **tok, AST **ast){
+	AST *tl = NULL, *tm = NULL, *tr = NULL;
 	Token *tmp = *tok;
 	int opt1 = 0, opt2 = 0, opt3 = 0;
 
@@ -1676,51 +1532,48 @@ forList(Token **tok, AST *ast){
 		opt2 = expr(&tmp, &tm);
 		if(scanToken(&tmp, T_SEMI)){
 			opt3 = expr(&tmp, &tr);
-			*ast = (AST){
-				A_FORLIST,
-				.left = opt1 ? copyAST(tl) : NULL,
-				.right = opt2 ? copyAST(tm) : NULL
+			*ast = allocAST(3);
+			**ast = (AST){
+				.ASTtype = A_FORLIST,
+				.flags = AF_NODE,
+				.length = 3
 			};
 
-			*ast = (AST){
-				A_FORLIST,
-				.left = copyAST(*ast),
-				.right = opt3 ? copyAST(tr) : NULL
-			};
-
+			(*ast)->data[0] = tl;
+			(*ast)->data[1] = tm;
+			(*ast)->data[2] = tr;
 			*tok = tmp;
 			return 1;
 		}
 		if(opt2)
-			freeASTLeaves(&tm);
+			freeAST(tm);
 	}
 	if(opt1)
-		freeASTLeaves(&tl);
+		freeAST(tl);
 
+	tl = tm = tr = NULL;
 	opt1 = opt2 = 0;
 	tmp = *tok;
 	if(declaration(&tmp, &tl)){
 		int opt1 = expr(&tmp, &tm);
 		if(scanToken(&tmp, T_SEMI)){
 			int opt2 = expr(&tmp, &tr);
-			*ast = (AST){
-				A_FORLIST,
-				.left = copyAST(tl),
-				.right = opt1 ? copyAST(tm) : NULL
+			*ast = allocAST(3);
+			**ast = (AST){
+				.ASTtype = A_FORLIST,
+				.flags = AF_NODE,
+				.length = 3
 			};
 
-			*ast = (AST){
-				A_FORLIST,
-				.left = copyAST(*ast),
-				.right = opt2 ? copyAST(tr) : NULL
-			};
-
+			(*ast)->data[0] = tl;
+			(*ast)->data[1] = tm;
+			(*ast)->data[2] = tr;
 			*tok = tmp;
 			return 1;
 		}
 		if(opt1)
-			freeASTLeaves(&tm);
-		freeASTLeaves(&tl);
+			freeAST(tm);
+		freeAST(tl);
 	}
 
 	return 0;
@@ -1728,55 +1581,40 @@ forList(Token **tok, AST *ast){
 
 // iso c99 135
 static int
-iterationStatement(Token **tok, AST *ast)
+iterationStatement(Token **tok, AST **ast)
 {
-	AST tl, tr;
+	AST *tl, *tr;
 	Token *tmp = *tok;
 	if(scanToken(&tmp, T_WHILE) && Capsule(expr, PAREN, &tmp, &tl)){
 		if(statement(&tmp, &tr)){
-			*ast = (AST){
-				A_WHILE,
-				.left = copyAST(tl),
-				.right = copyAST(tr)
-			};
-
+			*ast = initNode(A_WHILE, tl, tr);
 			*tok = tmp;
 			return 1;
 		}
-		freeASTLeaves(&tl);
+		freeAST(tl);
 	}
 
 	tmp = *tok;
 	if(scanToken(&tmp, T_DO) && statement(&tmp, &tl)){
 		if(scanToken(&tmp, T_WHILE) && Capsule(expr, PAREN, &tmp, &tr)){
 			if(scanToken(&tmp, T_SEMI)){
-				*ast = (AST){
-					A_DOWHILE,
-					.left = copyAST(tr),
-					.right = copyAST(tl)
-				};
-
+				*ast = initNode(A_DOWHILE, tr, tl);
 				*tok = tmp;
 				return 1;
 			}
-			freeASTLeaves(&tr);
+			freeAST(tr);
 		}
-		freeASTLeaves(&tl);
+		freeAST(tl);
 	}
 
 	tmp = *tok;
 	if(scanToken(&tmp, T_FOR) && Capsule(forList, PAREN, &tmp, &tl)){
 		if(statement(&tmp, &tr)){
-			*ast = (AST){
-				A_FOR,
-				.left = copyAST(tl),
-				.right = copyAST(tr)
-			};
-
+			*ast = initNode(A_FOR, tl, tr);
 			*tok = tmp;
 			return 1;
 		}
-		freeASTLeaves(&tl);
+		freeAST(tl);
 	}
 
 	return 0;
@@ -1784,27 +1622,17 @@ iterationStatement(Token **tok, AST *ast)
 
 // iso c99 133
 static int
-selectionStatement(Token **tok, AST *ast)
+selectionStatement(Token **tok, AST **ast)
 {
-	AST tl, tm, tr;
+	AST *tl, *tm, *tr;
 	Token *tmp = *tok;
 
 	if(scanToken(&tmp, T_IF) && Capsule(expr, PAREN, &tmp, &tl)){
 		if(statement(&tmp, &tm)){
-			*ast = (AST){
-				A_IF,
-				.left = copyAST(tl),
-				.right = copyAST(tm)
-			};
-
+			*ast = initNode(A_IF, tl, tm);
 			Token *ttmp = tmp;
 			if(scanToken(&ttmp, T_ELSE) && statement(&ttmp, &tr)){
-				*ast = (AST){
-					A_IFELSE,
-					.left = copyAST(*ast),
-					.right = copyAST(tr)	
-				};
-
+				*ast = initNode(A_IFELSE, *ast, tr);
 				*tok = ttmp;
 				return 1;
 			}
@@ -1813,22 +1641,17 @@ selectionStatement(Token **tok, AST *ast)
 			*tok = tmp;
 			return 1;
 		}
-		freeASTLeaves(&tl);
+		freeAST(tl);
 	}
 
 	tmp = *tok;
 	if(scanToken(&tmp, T_SWITCH) && Capsule(expr, PAREN, &tmp, &tl)){
 		if(statement(&tmp, &tr)){
-			*ast = (AST){
-				A_SWITCH,
-				.left = copyAST(tl),
-				.right = copyAST(tr)
-			};
-
+			*ast = initNode(A_SWITCH, tl, tr);
 			*tok = tmp;
 			return 1;
 		}
-		freeASTLeaves(&tl);
+		freeAST(tl);
 	}
 
 	return 0;
@@ -1836,57 +1659,46 @@ selectionStatement(Token **tok, AST *ast)
 
 // iso c99 132
 static int
-exprStatement(Token **tok, AST *ast)
+exprStatement(Token **tok, AST **ast)
 {
 	Token *tmp = *tok;
 	int opt = expr(&tmp, ast);
 
 	if(scanToken(&tmp, T_SEMI)){
-		if(!opt){
-			*ast = (AST){
-				A_EMPTYSTATEMENT,
-				.left = NULL,
-				.right = NULL
-			};
-		}
-		
+		if(!opt)
+			*ast = initUNode(A_EMPTYSTATEMENT, NULL);
 		*tok = tmp;
 		return 1;
 	}
 
 	if(opt)
-		freeASTLeaves(ast);
+		freeAST(*ast);
 
 	return 0;
 }
 
 // iso c99 132
 static int
-blockItem(Token **tok, AST *ast)
+blockItem(Token **tok, AST **ast)
 {
 	return declaration(tok, ast) || statement(tok, ast);
 }
 
 // iso c99 132
 static int
-blockItemList(Token **tok, AST *ast)
+blockItemList(Token **tok, AST **ast)
 {
 	return Sequence(blockItem, A_BLOCKLIST, tok, ast);
 }
 
 // iso c99 132
 static int
-compoundStatement(Token **tok, AST *ast)
+compoundStatement(Token **tok, AST **ast)
 {
 	Token *tmp = *tok;
 
 	if(scanToken(&tmp, T_LCURLY) && scanToken(&tmp, T_RCURLY)){
-		*ast = (AST){
-			A_BLOCK,
-			.left = NULL,
-			.right = NULL
-		};
-
+		*ast = initUNode(A_BLOCK, NULL);
 		*tok = tmp;
 		return 1;
 	}
@@ -1896,50 +1708,36 @@ compoundStatement(Token **tok, AST *ast)
 
 // iso c99 131
 static int
-labelStatement(Token **tok, AST *ast)
+labelStatement(Token **tok, AST **ast)
 {
 	static const int LRCASE[] = {T_CASE, T_COLON};
 	Token *tmp = *tok;
-	AST tl, tr;
+	AST *tl, *tr;
 
 	if(identifier(&tmp, &tl)){
 		if(scanToken(&tmp, T_COLON) && statement(&tmp, &tr)){
-			*ast = (AST){
-				A_LABELSTATEMENT,
-				.left = copyAST(tl),
-				.right = copyAST(tr)
-			};
-
+			*ast = initNode(A_LABELSTATEMENT, tl, tr);
 			*tok = tmp;
 			return 1;
 		}
-		freeASTLeaves(&tl);
+		freeAST(tl);
 	}
 
 	tmp = *tok;
 	if(Capsule(elvisExpr, LRCASE, &tmp, &tl)){
 		if(statement(&tmp, &tr)){
-			*ast = (AST){
-				A_LABELSTATEMENT,
-				.left = copyAST(tl),
-				.right = copyAST(tr)
-			};
-
+			*ast = initNode(A_LABELSTATEMENT, tl, tr);
 			*tok = tmp;
 			return 1;
 		
 		}
-		freeASTLeaves(&tl);
+		freeAST(tl);
 	}
+
 
 	tmp = *tok;
 	if(scanToken(&tmp, T_DEFAULT) && scanToken(&tmp, T_COLON) && statement(&tmp, &tr)){
-		*ast = (AST){
-			A_LABELSTATEMENT,
-			.left = NULL,
-			.right = copyAST(tr)
-		};
-
+		*ast = initNode(A_LABELSTATEMENT, NULL, tr);
 		*tok = tmp;
 		return 1;
 	}
@@ -1949,56 +1747,48 @@ labelStatement(Token **tok, AST *ast)
 
 // iso c99 131
 static int
-statement(Token **tok, AST *ast)
+statement(Token **tok, AST **ast)
 {
 	return labelStatement(tok, ast) || iterationStatement(tok, ast) || exprStatement(tok, ast) || selectionStatement(tok, ast) || jumpStatement(tok, ast) || compoundStatement(tok, ast);
 }
 
 // iso c99 141
 static int
-declarationList(Token **tok, AST *ast)
+declarationList(Token **tok, AST **ast)
 {
 	return Sequence(declaration, A_DECLARATIONLIST, tok, ast);
 }
 
 // iso c99 141
 static int
-functionDeclaration(Token **tok, AST *ast)
+functionDeclaration(Token **tok, AST **ast)
 {
-	AST tl, tml, tmr, tr;
+	AST *tl, *tml, *tmr = NULL, *tr;
 	Token *tmp = *tok;
 
 	if(declarationSpecifiers(&tmp, &tl)){
 		if(declarator(&tmp, &tml)){
 			int opt = declarationList(&tmp, &tmr);
 			if(compoundStatement(&tmp, &tr)){
-
-				tl = (AST){
-					A_FUNCDECL,
-					.left = copyAST(tl),
-					.right = copyAST(tml)
+				*ast = allocAST(4);
+				**ast = (AST){
+					.ASTtype = A_FUNCDECL,
+					.flags = AF_NODE,
+					.length = 4
 				};
 
-				tr = (AST){
-					A_FUNCDECL,
-					.left = opt ? copyAST(tmr) : NULL,
-					.right = copyAST(tr)
-				};
-
-				*ast = (AST){
-					A_FUNCDECL,
-					.left = copyAST(tl),
-					.right = copyAST(tr)
-				};
-
+				(*ast)->data[0] = tl;
+				(*ast)->data[1] = tml;
+				(*ast)->data[2] = tmr;
+				(*ast)->data[3] = tr;
 				*tok = tmp;
 				return 1;
 			}
 			if(opt)
-				freeASTLeaves(&tmr);
-			freeASTLeaves(&tml);
+				freeAST(tmr);
+			freeAST(tml);
 		}
-		freeASTLeaves(&tl);
+		freeAST(tl);
 	}
 
 	return 0;
@@ -2006,14 +1796,14 @@ functionDeclaration(Token **tok, AST *ast)
 
 // iso c99 140
 static int
-externalDeclaration(Token **tok, AST *ast)
+externalDeclaration(Token **tok, AST **ast)
 {
 	return functionDeclaration(tok, ast) || declaration(tok, ast);
 }
 
 // iso c99 140
 static int
-translationUnit(Token **tok, AST *ast)
+translationUnit(Token **tok, AST **ast)
 {
 	return Sequence(externalDeclaration, A_TRANSLATIONUNIT, tok, ast);
 }
@@ -2021,15 +1811,15 @@ translationUnit(Token **tok, AST *ast)
 AST*
 genAST(Token **tok)
 {
-	AST lt;
+	AST *lt;
 	Token *tmp = *tok;
 
 	if(translationUnit(&tmp, &lt)){
 		if(tmp->token != T_PPEXTRA){
-			freeASTLeaves(&lt);
+			freeAST(lt);
 			return NULL;
 		}
-		return copyAST(lt);
+		return lt;
 	}
 	return NULL;
 }
