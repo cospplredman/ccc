@@ -531,7 +531,6 @@ keyword(char **str, Token *tok)
 	return 0;
 }
 
-//TODO preprocessor
 static int
 ppExtra(char **str, Token *tok)
 {
