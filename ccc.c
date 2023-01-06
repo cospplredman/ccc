@@ -38,8 +38,6 @@ int main(int argc, char **argv){
 		char *str = readfile(cf), *strp = str;
 
 		Token *tok = genTokens(&strp);
-		printTokens(tok);
-
 		AST *ast = genAST(&tok);
 
 		if(!ast)

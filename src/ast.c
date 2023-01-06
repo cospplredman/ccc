@@ -25,7 +25,7 @@ freeAST(AST *ast)
 	}
 }
 
-void
+static void
 freeASTLeaves(AST *ast)
 {
 	if(ast){
@@ -52,7 +52,7 @@ allocAST()
 	return (AST*)calloc(1, sizeof(AST));
 }
 
-AST*
+static AST*
 copyAST(AST ast)
 {
 	AST *lamp = allocAST();
@@ -233,40 +233,38 @@ static const char* astName[] = {
 	"A_DECLARATIONLIST", "A_FUNCDECL", "A_TRANSLATIONUNIT",
 };
 
-void
-printAST(AST *ast)
+static void
+printAST_(AST *ast, int depth)
 {
-	//if(ast)
-	//	printf("\n %p %d %p %p\n", ast, ast->type, ast->left, ast->right);
-	
-	if(ast == NULL){
-		printf("_");
-		return;
+	for(int i = 0; i < depth; i++){
+		printf("   ");
 	}
-	
-	printf("(");
-	if(ast->type == A_INTLIT){
-		printf("%lld", ast->intValue);
-		printf(")");
+
+	if(ast == NULL){
+		printf("%p\n", NULL);
 		return;
 	}
 	
 	if(ast->type == A_IDENT){
-		printf("%.*s", (int)(ast->end - ast->start), ast->start);
-		printf(")");
+		printf("(%.*s)\n", (int)(ast->end - ast->start), ast->start);
 		return;
 	}
 
-	if(ast->type == A_STORAGESPEC || ast->type == A_TYPESPEC || ast->type == A_TYPEQUAL || ast->type == A_FUNCSPEC){
-		printf("%lld", ast->intValue);
-		printf(")");
+	if(ast->type == A_STORAGESPEC || ast->type == A_TYPESPEC || ast->type == A_TYPEQUAL || ast->type == A_FUNCSPEC || ast->type == A_INTLIT){
+		printf("(%lld)\n", ast->intValue);
 		return;
 	}
 
-	printf("%s", astName[ast->type]);
-	printAST(ast->left);
-	printAST(ast->right);
-	printf(")");
+	printf("%s:\n", astName[ast->type]);
+	printAST_(ast->left, depth + 1);
+	printAST_(ast->right, depth + 1);
+	
+}
+
+void
+printAST(AST *ast)
+{
+	printAST_(ast, 0);
 }
 
 /* ast generation functions */
