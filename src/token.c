@@ -9,21 +9,88 @@
 #define HEXVAL(b)  (ISDIGIT(b) ? ((b) - '0') : (((b) | 32) - 'a' + 10))
 #define ISALPHA(a) (((a) | 32) >= 'a' && ((a) | 32) <= 'z')
 
+/* util functions */
+
+static const char *tokenName[] = {
+	"T_AUTO", "T_ENUM", "T_RESTRICT", "T_UNSIGNED", "T_BREAK", "T_EXTERN", "T_RETURN", "T_VOID", "T_CASE", "T_FLOAT", "T_SHORT", "T_VOLATILE", "T_CHAR", "T_FOR", "T_SIGNED", "T_WHILE", "T_CONST", "T_GOTO", "T_SIZEOF", "T_BOOL", "T_CONTINUE", "T_IF", "T_STATIC", "T_COMPLEX", "T_DEFAULT", "T_INLINE", "T_STRUCT", "T_IMAGINARY", "T_DO", "T_INT", "T_SWITCH", "T_DOUBLE", "T_LONG", "T_TYPEDEF", "T_ELSE", "T_REGISTER", "T_UNION",
+	"T_IDENTIFIER",
+	
+	"T_INTEGERCONST",
+	"T_FLOATCONST",
+	"T_CHARCONST",
+
+	"T_STRINGLIT",
+
+	"T_LBRACE", "T_RBRACE", "T_LPAREN", "T_RPAREN", "T_LCURLY", "T_RCURLY", "T_DOT", "T_ARROW", "T_INC", "T_DEC", "T_AND", "T_STAR", "T_PLUS", "T_MINUS", "T_TILDE", "T_BANG", "T_SLASH", "T_PERCENT", "T_LSHIFT", "T_RSHIFT", "T_LT", "T_GT", "T_LTEQ", "T_GTEQ", "T_EQUAL", "T_NOTEQUAL", "T_XOR", "T_OR", "T_BAND", "T_BOR", "T_QMARK", "T_COLON", "T_SEMI", "T_ELIPSIS", "T_EQUALS", "T_EQ", "T_MULEQ", "T_DIVEQ", "T_MODEQ", "T_ADDEQ", "T_SUBEQ", "T_LSHIFTEQ", "T_RSHIFTEQ", "T_ANDEQ", "T_XOREQ", "T_OREQ", "T_COMMA", "T_POUND", "T_PPCONCAT",
+
+	"T_PPHEADER",
+
+	"T_WS",
+	"T_PPEXTRA"
+};
+
+void
+printToken(Token *tok)
+{
+	printf("%-15s: %lld %lf \"%.*s\"\n", tokenName[tok->token], tok->intValue, tok->floatValue, (int)(tok->end - tok->start), tok->start);
+}
+
+void
+printTokens(Token *tok)
+{
+	printToken(tok);
+	if(tok->next)
+		printTokens(tok->next);
+}
+
+Token*
+allocToken()
+{
+	return (Token*)malloc(sizeof(Token));
+}
+
+void
+freeToken(Token *tok)
+{
+	if(tok->next)
+		freeToken(tok->next);
+	free(tok);
+}
+
+static int
+scanChar(char **str, char ch)
+{
+	if(**str == ch){
+		(*str)++;
+		return 1;
+	}
+
+	return 0;
+}
+
+static int
+scanCharLower(char **str, char ch)
+{
+	if((**str | 32) == ch){
+		(*str)++;
+		return 1;
+	}
+
+	return 0;
+}
+
 static void
 skipIntSufix(char **str)
 {
 	char *cur = *str;
-	if((*cur | 32) == 'u')
-		cur++;
-	if((*cur | 32) == 'l')
-		cur++;
-	if((*cur | 32) == 'l')
-		cur++;
-	if((**str | 32) != 'u' && (*cur | 32) == 'u')
-		cur++;
-	if(cur != *str)
-		*str = cur;
+	int opt = scanCharLower(&cur, 'u');
+	scanCharLower(&cur, 'l');
+	scanCharLower(&cur, 'l');
+	!opt && scanCharLower(&cur, 'u');
+	*str = cur;
 }
+
+/* token parsing */
 
 static int
 decIntConst(char **str, Token *tok)
@@ -142,47 +209,48 @@ static int
 floatConst(char **str, Token *tok)
 {
 	char *cur = *str;
-	if(*cur == '0' && (cur[1] | 32) == 'x'){
-		cur += 2;
-		if(hexDigitSeq(&cur) && *cur == '.'){
-			cur++;
-			hexDigitSeq(&cur);
-		}else if((-1)[++cur] != '.' || !hexDigitSeq(&cur)){
-			return 0;
+	if(scanChar(&cur, '0') && scanCharLower(&cur, 'x')){
+		int opt = hexDigitSeq(&cur);
+		if(scanChar(&cur, '.')){
+			int opt1 = hexDigitSeq(&cur);
+			if(opt || opt1){
+				char *ccur = cur;
+				if(scanCharLower(&ccur, 'p')){
+					scanChar(&ccur, '+') || scanChar(&ccur, '-');
+					if(digitSeq(&ccur))
+						cur = ccur;
+				}
+				goto end;
+			}
 		}
-
-		if((*cur++ | 32) == 'p'){
-			if(*cur == '+' || *cur == '-')
-				cur++;
-			
-			digitSeq(&cur);
-		}
-
-
-	}else{
-		if(digitSeq(&cur) && *cur == '.'){
-			cur++;
-			digitSeq(&cur);
-		}else if((-1)[++cur] != '.' || !digitSeq(&cur)){
-			return 0;
-		}
-
-		if((*cur++ | 32) == 'e'){
-			if(*cur == '+' || *cur == '-')
-				cur++;
-
-			digitSeq(&cur);
-		}	
 	}
 
-	if((*cur | 32) == 'l' || (*cur | 32) == 'f')
-		cur++;
+	cur = *str;
+	int opt = digitSeq(&cur);
+	if(scanChar(&cur, '.')){
+		int opt1 = digitSeq(&cur);
+		if(opt || opt1){
+			char *ccur = cur;
+			if(scanCharLower(&ccur, 'e')){
+				scanChar(&ccur, '+') || scanChar(&ccur, '-');
+				if(digitSeq(&ccur))
+					cur = ccur;
+			}
+			goto end;
+		}
+	}
+
+	return 0;
+
+end:
+	scanCharLower(&cur, 'l') || scanCharLower(&cur, 'f');
 
 	*tok = (Token){
 		T_FLOATCONST,
 		*str,
 		cur,
-		.floatValue = strtof(tok->start, NULL)
+		//TODO do it myself >:3
+		.floatValue = strtof(*str, NULL)
 	};
 
 	*str = cur;
@@ -193,23 +261,21 @@ floatConst(char **str, Token *tok)
 static int
 universalCharacterName(char **str, Token *tok){
 	char *cur = *str;
-	if(*cur != '\\' || (cur[1] | 32) != 'u')
-		return 0;
-
-	cur += 2;
-	
-	tok->intValue = 0;
 	int j, i;
-	for(j = 0; j < 2; j++){
-		for(i = 0; i < 4; i++){
-			if(!ISHEX(*cur))
-				goto ret;
-
-			tok->intValue = tok->intValue * 16 + HEXVAL(*cur);
-			cur++;
+	if(scanChar(&cur, '\\') && scanCharLower(&cur, 'u')){
+		tok->intValue = 0;
+		for(j = 0; j < 2; j++){
+			for(i = 0; i < 4; i++){
+				if(!ISHEX(*cur))
+					goto ret;
+	
+				tok->intValue = (tok->intValue << 4) + HEXVAL(*cur);
+				cur++;
+			}
 		}
-	}	
+	}
 
+	return 0;
 ret:
 	if(j == 0)
 		return 0;
@@ -234,50 +300,27 @@ ret:
 static int
 escapeSequence(char **str, Token *tok)
 {
+	char *cur = *str;
 
 	if(universalCharacterName(str, tok))
 		return 1;
 
-	char *cur = *str;
-	if(*cur++ != '\\')
+	if(!scanChar(&cur, '\\'))
 		return 0;
 
-	switch(*cur++){
-		case '\\':
-			tok->intValue = '\\';
-		break;
-		case 'a':
-			tok->intValue = '\a';
-		break;
-		case 'b':
-			tok->intValue = '\b';
-		break;
-		case 'f':
-			tok->intValue = '\f';
-		break;
-		case 'n':
-			tok->intValue = '\n';
-		break;
-		case 'r':
-			tok->intValue = '\r';
-		break;
-		case 't':
-			tok->intValue = '\t';
-		break;
-		case 'v':
-			tok->intValue = '\v';
-		break;
-		case '\'':
-			tok->intValue = '\'';
-		break;
-		case '\"':
-			tok->intValue = '\"';
-		break;
-		case '?':
-			tok->intValue = '\?';
-		break;
-		case 'x':
-			tok->intValue = 0;
+	switch((*cur)++){
+		case '\\': tok->intValue = '\\'; break;
+		case 'a': tok->intValue = '\a'; break;
+		case 'b': tok->intValue = '\b'; break;
+		case 'f': tok->intValue = '\f'; break;
+		case 'n': tok->intValue = '\n'; break;
+		case 'r': tok->intValue = '\r'; break;
+		case 't': tok->intValue = '\t'; break;
+		case 'v': tok->intValue = '\v'; break;
+		case '\'': tok->intValue = '\''; break;
+		case '\"': tok->intValue = '\"'; break; 
+		case '?': tok->intValue = '\?'; break;
+		case 'x': tok->intValue = 0;
 			if(!ISHEX(*cur))
 				return 0;
 
@@ -312,8 +355,10 @@ escapeSequence(char **str, Token *tok)
 		cur,
 		.intValue = tok->intValue //TODO use to generate actual strings
 	};
+
 	*str = cur;
 	return 1;
+	
 }
 
 // iso c99 59
@@ -321,31 +366,31 @@ static int
 charConst(char **str, Token *tok)
 {
 	char *cur = *str;
-	if(*cur == 'L')
-		cur++;
+	//TODO wide strings?
+	scanChar(&cur, 'L');
 
-	if(*cur++ != '\'')
-		return 0;
+	if(scanChar(&cur, '\'')){
+		if(!escapeSequence(&cur, tok)){
+			if(*cur == '\'' || *cur == '\\' || *cur == '\n')
+				return 0;
+			tok->intValue = *cur;
+			cur++;
+		}
 
-	if(!escapeSequence(&cur, tok)){
-		if(*cur == '\'' || *cur == '\\' || *cur == '\n')
-			return 0;
-		tok->intValue = *cur;
-		cur++;
+		if(scanChar(&cur, '\'')){
+			*tok = (Token){
+				T_CHARCONST,
+				*str,
+				cur,
+				.intValue = tok->intValue
+			};
+
+			*str = cur;
+			return 1;
+		}
 	}
 
-	if(*cur++ != '\'')
-		return 0;
-
-	*tok = (Token){
-		T_CHARCONST,
-		*str,
-		cur,
-		.intValue = tok->intValue
-	};
-
-	*str = cur;
-	return 1;
+	return 0;
 }
 
 //iso c99 54
@@ -360,34 +405,27 @@ static int
 stringLit(char **str, Token *tok)
 {
 	char *cur = *str;
-	if(*cur == 'L')
-		cur++;
+	scanChar(&cur, 'L');
 
-	if(*cur++ != '\"')
-		return 0;
-
-	while(*cur != '"'){
-		if(*cur == '\n')
-			return 0;
-		if(!escapeSequence(&cur, tok)){
-			//TODO generate actual string
-			if(*cur == '\\')
+	if(scanChar(&cur, '"')){
+		while(!scanChar(&cur, '"')){
+			if(scanChar(&cur, '\n') || (*cur == '\\' && !escapeSequence(&cur, tok)))
 				return 0;
+
 			cur++;
 		}
+
+		*tok = (Token){
+			T_STRINGLIT,
+			*str,
+			cur
+		};
+
+		*str = cur;
+		return 1;
 	}
 
-	if(*cur++ != '\"')
-		return 0;
-
-	*tok = (Token){
-		T_STRINGLIT,
-		*str,
-		cur
-	};
-
-	*str = cur;
-	return 1;
+	return 0;
 }
 
 //iso c99 51
@@ -451,7 +489,7 @@ punctuator(char **str, Token *tok)
 
 		*str = *str + index;
 		return 1;
-	end:;
+	end:
 	    word++;
 	}
 	return 0;
@@ -486,7 +524,7 @@ keyword(char **str, Token *tok)
 
 		*str = *str + index;
 		return 1;
-	end:;
+	end:
 	    word++;
 	}
 
@@ -515,44 +553,31 @@ whiteSpace(char **str, Token *tok)
 
 	while(1){
 		switch(*cur){
-			case '\n':
-			case '\f':
-			case '\r':
-			case '\v':
-			case '\t':
-			case ' ':
-				cur++;
-			break;
+			case '\n': case '\f': case '\r': case '\v': case '\t': case ' ': cur++; continue;
 			case '/':
 				cur++;
-				if(*cur == '/'){
-					while(*cur != '\n'){
+				if(scanChar(&cur, '/')){
+					while(!scanChar(&cur, '\n'))
 						cur++;
-						if(*cur == '\\' && cur[1] == '\n')
-							cur += 2;
-					}
-				}else if(*cur == '*'){
-					while(*cur != '*' || cur[1] != '/') cur++;
-					cur += 2;
-				}else{
-					cur--;
-					tok->token = T_WS;
-					tok->start = *str;
-					tok->end = cur;
-					*str = cur;
-					return 1;
-				}	
-			break;
-			default:
-				if(cur == *str)
-					return 0;
-
-				tok->token = T_WS;
-				tok->start = *str;
-				tok->end = cur;
-				*str = cur;
-				return 1;
+					continue;
+				}
+				
+				if(scanChar(&cur, '*')){
+					while(!(scanChar(&cur, '*') && scanChar(&cur, '/')))
+						cur++;
+					continue;
+				}
+				cur--;
 		}
+
+		*tok = (Token){
+			T_WS,
+			*str,
+			cur
+		};
+
+		*str = cur;
+		return 1;
 	}
 }
 
@@ -560,54 +585,9 @@ whiteSpace(char **str, Token *tok)
 static int
 token(char **str, Token *tok)
 {
+	//TODO preprocessor
 	whiteSpace(str, tok);
-	return /* whiteSpace(str, tok) || */ keyword(str, tok) || identifier(str, tok) || constant(str, tok) || stringLit(str, tok) || punctuator(str, tok) || ppExtra(str, tok);
-}
-
-static const char *tokenName[] = {
-	"T_AUTO", "T_ENUM", "T_RESTRICT", "T_UNSIGNED", "T_BREAK", "T_EXTERN", "T_RETURN", "T_VOID", "T_CASE", "T_FLOAT", "T_SHORT", "T_VOLATILE", "T_CHAR", "T_FOR", "T_SIGNED", "T_WHILE", "T_CONST", "T_GOTO", "T_SIZEOF", "T_BOOL", "T_CONTINUE", "T_IF", "T_STATIC", "T_COMPLEX", "T_DEFAULT", "T_INLINE", "T_STRUCT", "T_IMAGINARY", "T_DO", "T_INT", "T_SWITCH", "T_DOUBLE", "T_LONG", "T_TYPEDEF", "T_ELSE", "T_REGISTER", "T_UNION",
-	"T_IDENTIFIER",
-	
-	"T_INTEGERCONST",
-	"T_FLOATCONST",
-	"T_CHARCONST",
-
-	"T_STRINGLIT",
-
-	"T_LBRACE", "T_RBRACE", "T_LPAREN", "T_RPAREN", "T_LCURLY", "T_RCURLY", "T_DOT", "T_ARROW", "T_INC", "T_DEC", "T_AND", "T_STAR", "T_PLUS", "T_MINUS", "T_TILDE", "T_BANG", "T_SLASH", "T_PERCENT", "T_LSHIFT", "T_RSHIFT", "T_LT", "T_GT", "T_LTEQ", "T_GTEQ", "T_EQUAL", "T_NOTEQUAL", "T_XOR", "T_OR", "T_BAND", "T_BOR", "T_QMARK", "T_COLON", "T_SEMI", "T_ELIPSIS", "T_EQUALS", "T_EQ", "T_MULEQ", "T_DIVEQ", "T_MODEQ", "T_ADDEQ", "T_SUBEQ", "T_LSHIFTEQ", "T_RSHIFTEQ", "T_ANDEQ", "T_XOREQ", "T_OREQ", "T_COMMA", "T_POUND", "T_PPCONCAT",
-
-	"T_PPHEADER",
-
-	"T_WS",
-	"T_PPEXTRA"
-};
-
-void
-printToken(Token *tok)
-{
-	printf("%-15s: %lld %lf \"%.*s\"\n", tokenName[tok->token], tok->intValue, tok->floatValue, (int)(tok->end - tok->start), tok->start);
-}
-
-void
-printTokens(Token *tok)
-{
-	printToken(tok);
-	if(tok->next)
-		printTokens(tok->next);
-}
-
-Token*
-allocToken()
-{
-	return (Token*)malloc(sizeof(Token));
-}
-
-void
-freeToken(Token *tok)
-{
-	if(tok->next)
-		freeToken(tok->next);
-	free(tok);
+	return keyword(str, tok) || identifier(str, tok) || constant(str, tok) || stringLit(str, tok) || punctuator(str, tok) || ppExtra(str, tok);
 }
 
 Token*
