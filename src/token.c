@@ -23,25 +23,15 @@ static const char *tokenName[] = {
 
 	"T_LBRACE", "T_RBRACE", "T_LPAREN", "T_RPAREN", "T_LCURLY", "T_RCURLY", "T_DOT", "T_ARROW", "T_INC", "T_DEC", "T_AND", "T_STAR", "T_PLUS", "T_MINUS", "T_TILDE", "T_BANG", "T_SLASH", "T_PERCENT", "T_LSHIFT", "T_RSHIFT", "T_LT", "T_GT", "T_LTEQ", "T_GTEQ", "T_EQUAL", "T_NOTEQUAL", "T_XOR", "T_OR", "T_BAND", "T_BOR", "T_QMARK", "T_COLON", "T_SEMI", "T_ELIPSIS", "T_EQUALS", "T_EQ", "T_MULEQ", "T_DIVEQ", "T_MODEQ", "T_ADDEQ", "T_SUBEQ", "T_LSHIFTEQ", "T_RSHIFTEQ", "T_ANDEQ", "T_XOREQ", "T_OREQ", "T_COMMA", "T_POUND", "T_PPCONCAT",
 
-	"T_PPHEADER",
-
-	"T_WS",
-	"T_PPEXTRA",
 	"T_EOF"
 };
 
 void
 printToken(Token *tok)
 {
-	printf("%-15s: \"%.*s\"\n", tokenName[tok->token], (int)(tok->end - tok->start), tok->start);
-}
-
-void
-printTokens(Token *tok)
-{
 	if(tok){
-		printToken(tok);
-		printTokens(tok->next);
+		printf("%-15s: \"%.*s\"\n", tokenName[tok->token], (int)(tok->end - tok->start), tok->start);
+		printToken(tok->next);
 	}	
 }
 
@@ -59,7 +49,7 @@ freeToken(Token *tok)
 	free(tok);
 }
 
-Token*
+static Token*
 initToken(int type, char *s, char *e)
 {
 	Token *tl = allocToken();
@@ -71,7 +61,7 @@ initToken(int type, char *s, char *e)
 	return tl;
 }
 
-static int
+int
 scanChar(char **str, char ch)
 {
 	if(**str == ch){
@@ -82,7 +72,7 @@ scanChar(char **str, char ch)
 	return 0;
 }
 
-static int
+int
 scanCharLower(char **str, char ch)
 {
 	if((**str | 32) == ch){
@@ -254,7 +244,7 @@ ret:
 	if(j == 1)
 		cur -= i;
 
-	*tok = initToken(T_PPEXTRA, *str, cur);
+	*tok = initToken(T_EOF, *str, cur);
 	*str = cur;
 	return 1;
 }
@@ -293,14 +283,14 @@ escapeSequence(char **str, Token **tok)
 			return 0;
 	}
 
-	*tok = initToken(T_PPEXTRA, *str, cur);
+	*tok = initToken(T_EOF, *str, cur);
 	*str = cur;
 	return 1;
 	
 }
 
 // iso c99 59
-static int
+int
 charConst(char **str, Token **tok)
 {
 	char *cur = *str;
@@ -332,7 +322,7 @@ constant(char **str, Token **tok)
 }
 
 // iso c99 62
-static int
+int
 stringLit(char **str, Token **tok)
 {
 	Token *tl;
@@ -363,7 +353,7 @@ stringLit(char **str, Token **tok)
 }
 
 //iso c99 51
-static int
+int
 identifier(char **str, Token **tok)
 {
 	char *cur = *str;
@@ -379,7 +369,7 @@ identifier(char **str, Token **tok)
 }
 
 // iso c99 63
-static int
+int
 punctuator(char **str, Token **tok)
 {
 	// iso c99 50 EXAMPLE 2
@@ -481,7 +471,8 @@ whiteSpace(char **str, Token **tok)
 				cur--;
 		}
 
-		*tok = initToken(T_WS, *str, cur);
+		//B/C shouldn't be a token
+		*tok = initToken(T_EOF, *str, cur);
 		*str = cur;
 		return 1;
 	}
