@@ -17,9 +17,10 @@ char* readFile(char *fn) {
 			}
 			free(buffer);
 		}
+		fclose(f);
 	}
 
-	fclose(f);
+	printf("failed to read file: \"%s\"\n", fn);
 	return NULL;
 }
 
@@ -30,12 +31,9 @@ int main(int argc, char **argv){
 		char *str = readFile(argv[i]);
 		Token *tok = genTokens(str);
 		AST *ast = genAST(tok);
-
-		if(!ast)
-			printf("could not generate ast\n");
-		else
-			printAST(ast);
 		
+		printAST(ast);
+
 		free(str);
 		freeToken(tok);
 		freeAST(ast);
