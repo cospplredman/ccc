@@ -72,4 +72,4 @@ typedef struct AST{
 AST *allocAST(int);
 void freeAST(AST *);
 void printAST(AST *);
-AST *genAST(Token **);
+AST *genAST(Token *);

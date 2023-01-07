@@ -84,7 +84,6 @@ scanToken(Token **tok, int token)
 		*tok = (*tok)->next;
 		return 1;
 	}
-
 	return 0;
 }
 
@@ -857,24 +856,18 @@ static int pointer(Token **,  AST **);
 static int
 abstractDeclarator(Token **tok, AST **ast)
 {
-	AST *tl, *tr;
+	AST *tl = NULL, *tr;
 	Token *tmp = *tok;
 
-	int opt = pointer(&tmp, &tl);
+	pointer(&tmp, &tl);
 
 	if(directAbstractDeclarator(&tmp, &tr)){
-		if(opt){
-			*ast = initNode(A_ABSTRACTDECLARATOR, tl, tr);
-			*tok = tmp;
-			return 1;
-		}
-
-		*ast = tr;
+		*ast = tl ? initNode(A_ABSTRACTDECLARATOR, tl, tr) : tr;
 		*tok = tmp;
 		return 1;
 	}
 
-	if(opt){
+	if(tl){
 		*ast = tl;
 		*tok = tmp;
 		return 1;
@@ -958,33 +951,31 @@ directSequence(Token **tok, AST **ast)
 		return 1;
 	}
 
+	tl = tm = tr = NULL;
 	tmp = *tok;
 	if(scanToken(&tmp, T_LBRACE)){
-		int opt = typeQualifierList(&tmp, &tm);
+		typeQualifierList(&tmp, &tm);
 		if(scanToken(&tmp, T_STAR) && scanToken(&tmp, T_RBRACE)){
 			//TODO less jank
-			tl = initNode(A_DIRECTDECLARATOR, opt ? tm : NULL, NULL);
+			tl = initNode(A_DIRECTDECLARATOR, tm, NULL);
 			*tok = tmp;
 			return 1;
-		} 
-
-		if(opt)
-			freeAST(tm);
+		}	
+		freeAST(tm);
 	}
 
+	tl = tm = tr = NULL;
 	tmp = *tok;
 	if(scanToken(&tmp, T_LBRACE)){
-		int opt = typeQualifierList(&tmp, &tm);
-		int opt1 = assignmentExpr(&tmp, &tr);
+		typeQualifierList(&tmp, &tm);
+		assignmentExpr(&tmp, &tr);
 		if(scanToken(&tmp, T_RBRACE)){
-			tl = initNode(A_DIRECTDECLARATOR, tl, initNode(A_DIRECTDECLARATOR, opt ? tm : NULL, opt1 ? tr : NULL));
+			tl = initNode(A_DIRECTDECLARATOR, tl, initNode(A_DIRECTDECLARATOR, tm, tr));
 			*tok = tmp;
 			return 1;
 		}
-		if(opt)
-			freeAST(tm);
-		if(opt1)
-			freeAST(tr);
+		freeAST(tm);
+		freeAST(tr);
 	}
 
 	tmp = *tok;
@@ -1026,18 +1017,12 @@ directDeclarator(Token **tok, AST **ast)
 static int
 declarator(Token **tok, AST **ast)
 {
-	AST *tl, *tr;
+	AST *tl = NULL, *tr;
 	Token *tmp = *tok;
-	int opt = pointer(&tmp, &tl);
+	pointer(&tmp, &tl);
 
 	if(directDeclarator(&tmp, &tr)){
-		if(opt){
-			*ast = initNode(A_DECLARATOR, tl, tr);
-			*tok = tmp;
-			return 1;
-		}
-
-		*ast = tr;
+		*ast = tl ? initNode(A_DECLARATOR, tl, tr) : tr;
 		*tok = tmp;
 		return 1;
 	}
@@ -1073,14 +1058,16 @@ designatorList(Token **tok, AST **ast)
 static int
 designation(Token **tok, AST **ast)
 {
+	AST *tl = NULL;
 	Token *tmp = *tok;
 
-	if(designatorList(&tmp, ast)){
+	if(designatorList(&tmp, &tl)){
 		if(scanToken(&tmp, T_EQ)){
+			*ast = tl;
 			*tok = tmp;
 			return 1;
 		}
-		freeAST(*ast);
+		freeAST(tl);
 	}
 
 	return 0;
@@ -1091,22 +1078,17 @@ static int initializer(Token **tok, AST **ast);
 static int
 initializerEntry(Token **tok, AST **ast)
 {
-	AST *tl, *tr;
+	AST *tl = NULL, *tr;
 	Token *tmp = *tok;
-	int opt = designation(&tmp, &tl);
+	designation(&tmp, &tl);
 
 	if(initializer(&tmp, &tr)){
+		*ast = tl ? initNode(A_INITIALIZER, tl, tr) : tr;
 		*tok = tmp;
-		if(opt){
-			*ast = tl;
-			//TODO less jank
-			(*ast)->data[1] = tr;
-			return 1;
-		}
-
-		*ast = tr;
 		return 1;
 	}
+
+	freeAST(tl);
 
 	return 0;
 }
@@ -1203,19 +1185,19 @@ qualifierList(Token **tok, AST **ast)
 static int
 structDeclarator(Token **tok, AST **ast)
 {
-	AST *tl, *tr;
+	AST *tl = NULL, *tr;
 	Token *tmp = *tok;
-	int opt = declarator(&tmp, &tl);
+	declarator(&tmp, &tl);
 
 	Token *ttmp = tmp;
 	//constexpr
 	if(scanToken(&ttmp, T_COLON) && elvisExpr(&ttmp, &tr)){
-		*ast = initNode(A_STRUCTDECLR, opt ? tl : NULL, tr);
+		*ast = initNode(A_STRUCTDECLR, tl, tr);
 		*tok = ttmp;
 		return 1;
 	}
 
-	if(opt){
+	if(tl){
 		*ast = tl;
 		*tok = tmp;
 		return 1;
@@ -1262,7 +1244,7 @@ structDeclarationList(Token **tok, AST **ast){
 static int
 structOrUnionSpecifier(Token **tok, AST **ast)
 {
-	AST *tl, *tr;
+	AST *tl = NULL, *tr;
 	Token *tmp = *tok;
 	int type = -1;
 
@@ -1273,14 +1255,14 @@ structOrUnionSpecifier(Token **tok, AST **ast)
 	tmp = tmp->next;
 
 	if(type >= 0){
-		int opt = identifier(&tmp, &tl);
+		identifier(&tmp, &tl);
 		if(Capsule(structDeclarationList, CURLY, &tmp, &tr)){
-			*ast = initNode(type, opt ? tl : NULL, tr);
+			*ast = initNode(type, tl, tr);
 			*tok = tmp;
 			return 1;
 		}
 
-		if(opt){
+		if(tl){
 			*ast = initUNode(type, tl);
 			*tok = tmp;
 			return 1;
@@ -1325,19 +1307,18 @@ enumeratorList(Token **tok, AST **ast)
 static int
 enumSpecifier(Token **tok, AST **ast)
 {
-	AST *tl, *tr;
+	AST *tl = NULL, *tr;
 	Token *tmp = *tok;
 
 	if(scanToken(&tmp, T_ENUM)){
-		int opt = identifier(&tmp, &tl);
-		
+		identifier(&tmp, &tl);
 		if(CapsuleWComma(enumeratorList, CURLY, &tmp, &tr)){
-			*ast = initNode(A_ENUMSPEC, opt ? tl : NULL, tr);
+			*ast = initNode(A_ENUMSPEC, tl, tr);
 			*tok = tmp;
 			return 1;
 		}
 
-		if(opt){
+		if(tl){
 			*ast = initUNode(A_ENUMSPEC, tl);
 			*tok = tmp;
 			return 1;
@@ -1502,11 +1483,10 @@ static int
 forList(Token **tok, AST **ast){
 	AST *tl = NULL, *tm = NULL, *tr = NULL;
 	Token *tmp = *tok;
-	int opt1 = 0, opt2 = 0;
 
-	opt1 = expr(&tmp, &tl);
+	expr(&tmp, &tl);
 	if(scanToken(&tmp, T_SEMI)){
-		opt2 = expr(&tmp, &tm);
+		expr(&tmp, &tm);
 		if(scanToken(&tmp, T_SEMI)){
 			expr(&tmp, &tr);
 			*ast = allocAST(3);
@@ -1523,17 +1503,14 @@ forList(Token **tok, AST **ast){
 			*tok = tmp;
 			return 1;
 		}
-		if(opt2)
-			freeAST(tm);
+		freeAST(tm);
 	}
-	if(opt1)
-		freeAST(tl);
+	freeAST(tl);
 
 	tl = tm = tr = NULL;
-	opt1 = opt2 = 0;
 	tmp = *tok;
 	if(declaration(&tmp, &tl)){
-		opt1 = expr(&tmp, &tm);
+		expr(&tmp, &tm);
 		if(scanToken(&tmp, T_SEMI)){
 			expr(&tmp, &tr);
 			*ast = allocAST(3);
@@ -1550,8 +1527,7 @@ forList(Token **tok, AST **ast){
 			*tok = tmp;
 			return 1;
 		}
-		if(opt1)
-			freeAST(tm);
+		freeAST(tm);
 		freeAST(tl);
 	}
 
@@ -1640,18 +1616,17 @@ selectionStatement(Token **tok, AST **ast)
 static int
 exprStatement(Token **tok, AST **ast)
 {
+	AST *tl = NULL;
 	Token *tmp = *tok;
-	int opt = expr(&tmp, ast);
+	expr(&tmp, &tl);
 
 	if(scanToken(&tmp, T_SEMI)){
-		if(!opt)
-			*ast = initUNode(A_EMPTYSTATEMENT, NULL);
+		*ast = tl ? tl : initUNode(A_EMPTYSTATEMENT, NULL);
 		*tok = tmp;
 		return 1;
 	}
 
-	if(opt)
-		freeAST(*ast);
+	freeAST(tl);
 
 	return 0;
 }
@@ -1747,7 +1722,7 @@ functionDeclaration(Token **tok, AST **ast)
 
 	if(declarationSpecifiers(&tmp, &tl)){
 		if(declarator(&tmp, &tml)){
-			int opt = declarationList(&tmp, &tmr);
+			declarationList(&tmp, &tmr);
 			if(compoundStatement(&tmp, &tr)){
 				*ast = allocAST(4);
 				**ast = (AST){
@@ -1764,8 +1739,7 @@ functionDeclaration(Token **tok, AST **ast)
 				*tok = tmp;
 				return 1;
 			}
-			if(opt)
-				freeAST(tmr);
+			freeAST(tmr);
 			freeAST(tml);
 		}
 		freeAST(tl);
@@ -1789,13 +1763,12 @@ translationUnit(Token **tok, AST **ast)
 }
 
 AST*
-genAST(Token **tok)
+genAST(Token *tok)
 {
 	AST *lt;
-	Token *tmp = *tok;
-
+	Token *tmp = tok;
 	if(translationUnit(&tmp, &lt)){
-		if(tmp->token != T_PPEXTRA){
+		if(tmp->token != T_EOF){
 			freeAST(lt);
 			return NULL;
 		}
