@@ -498,12 +498,12 @@ token(char **str, Token **tok)
 static int
 eof(char **str, Token **tok)
 {
-	//TODO actually test for eof
-	//if(*str == NULL || scanChar(str, 0)){
+	whiteSpace(str, tok);
+	if(*str == NULL || scanChar(str, 0)){
 		*tok = initToken(T_EOF, NULL, NULL);
 		(*tok)->next = NULL;
 		return 1;
-	//}
+	}
 
 	return 0;
 }
@@ -514,10 +514,13 @@ tokens(char **str, Token **tok)
 	Token *tl = NULL;
 	char *cur = *str;
 	if(token(&cur, &tl)){
-		(void)(tokens(&cur, &(tl->next)) || eof(&cur, &(tl->next)));
-		*tok = tl;
-		*str = cur;
-		return 1;
+		if(tokens(&cur, &(tl->next)) || eof(&cur, &(tl->next))){
+			*tok = tl;
+			*str = cur;
+			return 1;
+		}
+		tl->next = NULL;
+		freeToken(tl);
 	}
 	return 0;
 }
@@ -528,13 +531,12 @@ genTokens(char *str)
 	Token *tl;
 	char *cur = str;
 
+	if(cur && tokens(&cur, &tl))
+		return tl;
 
-
-	if(str == NULL || !tokens(&cur, &tl)){
-		tl = initToken(T_EOF, NULL, NULL);
-		tl->next = NULL;
-	}
-
+	printf("could not parse tokens\n");
+	tl = initToken(T_EOF, NULL, NULL);
+	tl->next = NULL;
 	return tl;
 }
 
