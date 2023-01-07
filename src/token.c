@@ -84,9 +84,9 @@ skipIntSufix(char **str)
 {
 	char *cur = *str;
 	int opt = scanCharLower(&cur, 'u');
-	scanCharLower(&cur, 'l');
-	scanCharLower(&cur, 'l');
-	!opt && scanCharLower(&cur, 'u');
+	(void)scanCharLower(&cur, 'l');
+	(void)scanCharLower(&cur, 'l');
+	(void)(opt && scanCharLower(&cur, 'u'));
 	*str = cur;
 }
 
@@ -216,7 +216,7 @@ floatConst(char **str, Token *tok)
 			if(opt || opt1){
 				char *ccur = cur;
 				if(scanCharLower(&ccur, 'p')){
-					scanChar(&ccur, '+') || scanChar(&ccur, '-');
+					(void)(scanChar(&ccur, '+') || scanChar(&ccur, '-'));
 					if(digitSeq(&ccur))
 						cur = ccur;
 				}
@@ -232,7 +232,7 @@ floatConst(char **str, Token *tok)
 		if(opt || opt1){
 			char *ccur = cur;
 			if(scanCharLower(&ccur, 'e')){
-				scanChar(&ccur, '+') || scanChar(&ccur, '-');
+				(void)(scanChar(&ccur, '+') || scanChar(&ccur, '-'));
 				if(digitSeq(&ccur))
 					cur = ccur;
 			}
@@ -243,7 +243,7 @@ floatConst(char **str, Token *tok)
 	return 0;
 
 end:
-	scanCharLower(&cur, 'l') || scanCharLower(&cur, 'f');
+	(void)(scanCharLower(&cur, 'l') || scanCharLower(&cur, 'f'));
 
 	*tok = (Token){
 		T_FLOATCONST,
@@ -593,13 +593,14 @@ Token*
 genTokens(char **str)
 {
 	Token *tok = allocToken();
-	Token *ctok = tok;
+	Token *tl = tok;
+	char *cur = *str;
 	while(1){
-		token(str, ctok);
-		if(ctok->token == T_PPEXTRA)
+		token(&cur, tl);
+		if(tl->token == T_PPEXTRA)
 			return tok;
-		ctok->next = allocToken();
-		ctok = ctok->next; 
+		tl->next = allocToken();
+		tl = tl->next; 
 	}
 }
 

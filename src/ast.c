@@ -5,49 +5,43 @@
 
 /* util functions */
 
-static void
-freeASTLeaves(AST *ast)
-{
-	if(ast && ast->flags == AF_NODE){
-		AST **data = (AST**)ast->data;
-		for(int i = 0; i < ast->length; i++)
-			freeAST(data[i]);
-	}
-}
-
 void
 freeAST(AST *ast)
 {
-	freeASTLeaves(ast);
-	free(ast);	
+	if(ast){	
+		if(ast->flags & AF_NODE){
+			AST **data = (AST**)ast->data;
+			for(int i = 0; i < ast->length; i++)
+				freeAST(data[i]);
+		}
+
+		if(ast->flags & AF_OWNSCOPE){
+			freeHashTable(ast->scope);
+		}
+
+		free(ast);	
+	}
 }
 
 
 AST*
 allocAST(int entries)
 {
-	//TODO make code more robust
-	return (AST*)calloc(1, sizeof(AST) + sizeof(void*)*entries);
-}
-
-static AST*
-copyAST(AST ast)
-{
-	AST *lamp = allocAST(ast.length);
-	*lamp = ast;
-	return lamp;
+	return (AST*)malloc(sizeof(AST) + sizeof(void*)*entries);
 }
 
 static AST*
 initNode(int type, AST *l, AST *r)
 {
 	AST *tl = allocAST(2);
-	*(AST2*)tl = (AST2){
+	*tl = (AST){
 		.ASTtype = type,
 		.length = 2,
+		.type = NULL,
 		.flags = AF_NODE,
-		.data = {l, r}
 	};
+	tl->data[0] = l;
+	tl->data[1] = r;
 
 	return tl;
 }
@@ -56,12 +50,29 @@ static AST*
 initUNode(int type, AST *l)
 {
 	AST *tl = allocAST(1);
-	*(AST1*)tl = (AST1){
+	*tl = (AST){
 		.ASTtype = type,
 		.length = 1,
+		.type = NULL,
 		.flags = AF_NODE,
-		.data = {l}
 	};
+	tl->data[0] = l;
+
+	return tl;
+}
+
+static AST*
+initStrNode(int type, char *s, char *e)
+{
+	AST *tl = allocAST(2);
+	*tl = (AST){
+		.ASTtype = type,
+		.length = 2,
+		.type = NULL,
+		.flags = AF_STRNODE,
+	};
+	tl->data[0] = s;
+	tl->data[1] = e;
 
 	return tl;
 }
@@ -124,6 +135,7 @@ List_(int (*of)(Token **, AST**), int type, Token **tok, AST **ast, int c)
 		*tr = (AST){
 			.ASTtype = type,
 			.flags = AF_NODE,
+			.type = NULL,
 			.length = c + 1
 		};
 		tr->data[c] = tl;
@@ -159,6 +171,7 @@ Sequence_(int (*of)(Token**, AST**), int type, Token **tok, AST **ast, int c)
 		*tr = (AST){
 			.ASTtype = type,
 			.flags = AF_NODE,
+			.type = NULL,
 			.length = c + 1
 		};
 		tr->data[c] = tl;
@@ -265,22 +278,21 @@ printAST_(AST *ast, int depth)
 		return;
 	}
 	
+	printf("%s:\n", astName[ast->ASTtype]);
 	switch(ast->flags){	
 		case AF_NODE:
-			printf("%s:\n", astName[ast->ASTtype]);
 			for(int i = 0; i < ast->length; i++)
 				printAST_((AST*)ast->data[i], depth + 1);
 			break;
 		case AF_STRNODE:
-			printf("%s:\n   ", astName[ast->ASTtype]);
 			for(int i = 0; i < depth; i++)
 				printf("   ");
-			printf("(%.*s)\n", (int)((char*)ast->data[1] - (char*)ast->data[0]), (char*)ast->data[0]);
+			printf("   (%.*s)\n", (int)((char*)ast->data[1] - (char*)ast->data[0]), (char*)ast->data[0]);
 			break;
 		case AF_TOKNODE:
-			printf("%s:\n   ", astName[ast->ASTtype]);
 			for(int i = 0; i < depth; i++)
 				printf("   ");
+			printf("   ");
 			printToken((Token*)ast->data[0]);
 			break;
 	}
@@ -300,14 +312,7 @@ identifier(Token **tok, AST **ast)
 {
 	Token *tmp = *tok;
 	if(scanToken(&tmp, T_IDENTIFIER)){
-		*ast = allocAST(2);
-		*(AST2*)*ast = (AST2){
-			.ASTtype = A_IDENT,
-			.flags = AF_STRNODE,
-			.length = 2,
-			.data = { (*tok)->start, (*tok)->end }
-		};
-
+		*ast = initStrNode(A_IDENT, (*tok)->start, (*tok)->end);
 		*tok = tmp;
 		return 1;
 	}
@@ -316,6 +321,7 @@ identifier(Token **tok, AST **ast)
 }
 
 // iso c99 69
+// string literals are parsed in the constant section aswell
 static int
 constant(Token **tok, AST **ast)
 {
@@ -324,15 +330,7 @@ constant(Token **tok, AST **ast)
 		case T_FLOATCONST:
 		case T_CHARCONST:
 		case T_STRINGLIT:
-			//TODO deal with strings properly
-			*ast = allocAST(2);
-			*(AST2*)*ast = (AST2){
-				.ASTtype = A_INTLIT,
-				.length = 2,
-				.flags = AF_STRNODE,
-				.data = { (*tok)->start, (*tok)->end }
-			};
-			
+			*ast = initStrNode(A_INTLIT, (*tok)->start, (*tok)->end);
 			*tok = (*tok)->next;
 			return 1;
 		break;
@@ -341,27 +339,6 @@ constant(Token **tok, AST **ast)
 	return 0;
 }
 
-// iso c99 69
-static int
-stringLit(Token **tok, AST **ast)
-{
-	Token *tmp = *tok;
-	if(scanToken(&tmp, T_STRINGLIT)){
-		//TODO do escape sequences and whatnot (alredy implimented just need to make a string)
-		*ast = allocAST(2);
-		*(AST2*)*ast = (AST2){
-			.ASTtype = A_STRLIT,
-			.length = 2,
-			.flags = AF_STRNODE,
-			.data = { (*tok)->start, (*tok)->end }
-		};
-
-		*tok = tmp;
-		return 1;
-	}
-
-	return 0;
-}
 
 static int expr(Token**, AST**);
 
@@ -369,7 +346,7 @@ static int expr(Token**, AST**);
 static int
 primaryExpr(Token **tok, AST **ast)
 {
-	return identifier(tok, ast) || constant(tok, ast) || stringLit(tok, ast) || Capsule(expr, PAREN, tok, ast);
+	return identifier(tok, ast) || constant(tok, ast) || Capsule(expr, PAREN, tok, ast);
 }
 
 static int typeName(Token **, AST **);
@@ -720,8 +697,8 @@ elvisExpr(Token **tok, AST **ast)
 			freeAST(tm);
 		}
 
-		*tok = tmp;
 		*ast = tl;
+		*tok = tmp;
 		return 1;
 	}
 	
@@ -859,7 +836,7 @@ static int
 directAbstractDeclarator(Token **tok, AST **ast)
 {
 	AST *tl = NULL, *tr = NULL;
-	Token *tmp = *tok, *ttmp;
+	Token *tmp = *tok;
 	printf("\nhi\n");
 
 	Capsule(abstractDeclarator, PAREN, &tmp, &tl);
@@ -916,7 +893,7 @@ typeName(Token **tok, AST **ast)
 	Token *tmp = *tok;
 
 	if(specifierQualifierList(&tmp, &tl)){
-		int opt = abstractDeclarator(&tmp, &tr);
+		abstractDeclarator(&tmp, &tr);
 
 		*ast = initNode(A_TYPENAME, tl, tr);
 		*tok = tmp;
@@ -1525,17 +1502,18 @@ static int
 forList(Token **tok, AST **ast){
 	AST *tl = NULL, *tm = NULL, *tr = NULL;
 	Token *tmp = *tok;
-	int opt1 = 0, opt2 = 0, opt3 = 0;
+	int opt1 = 0, opt2 = 0;
 
 	opt1 = expr(&tmp, &tl);
 	if(scanToken(&tmp, T_SEMI)){
 		opt2 = expr(&tmp, &tm);
 		if(scanToken(&tmp, T_SEMI)){
-			opt3 = expr(&tmp, &tr);
+			expr(&tmp, &tr);
 			*ast = allocAST(3);
 			**ast = (AST){
 				.ASTtype = A_FORLIST,
 				.flags = AF_NODE,
+				.type = NULL,
 				.length = 3
 			};
 
@@ -1555,11 +1533,12 @@ forList(Token **tok, AST **ast){
 	opt1 = opt2 = 0;
 	tmp = *tok;
 	if(declaration(&tmp, &tl)){
-		int opt1 = expr(&tmp, &tm);
+		opt1 = expr(&tmp, &tm);
 		if(scanToken(&tmp, T_SEMI)){
-			int opt2 = expr(&tmp, &tr);
+			expr(&tmp, &tr);
 			*ast = allocAST(3);
 			**ast = (AST){
+				.type = NULL,
 				.ASTtype = A_FORLIST,
 				.flags = AF_NODE,
 				.length = 3
@@ -1772,6 +1751,7 @@ functionDeclaration(Token **tok, AST **ast)
 			if(compoundStatement(&tmp, &tr)){
 				*ast = allocAST(4);
 				**ast = (AST){
+					.type = NULL,
 					.ASTtype = A_FUNCDECL,
 					.flags = AF_NODE,
 					.length = 4

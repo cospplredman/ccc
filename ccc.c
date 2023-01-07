@@ -5,9 +5,8 @@
 
 char* readfile(FILE *f) {
   // f invalid? fseek() fail?
-  if (f == NULL || fseek(f, 0, SEEK_END)) {
+  if(f == NULL || fseek(f, 0, SEEK_END))
     return NULL;
-  }
 
   long length = ftell(f);
   rewind(f);

@@ -41,18 +41,19 @@ enum{
 };
 
 enum{
-	TY_VOID, TY_CHAR, TY_SHORT, TY_INT, TY_LONG, TY_FLOAT, TY_DOUBLE, TY_SIGNED, TY_UNSIGNED, TY_BOOL, TY_COMPLEX, TY_IMAGINARY, TY_NONBASE
+	SC_VOID, SC_CHAR, SC_SHORT, SC_INT, SC_LONG, SC_FLOAT, SC_DOUBLE, SC_SIGNED, SC_UNSIGNED, SC_BOOL, SC_COMPLEX, SC_IMAGINARY, SC_NONBASE, SC_IDENTIFIER
 };
 
 enum{
 	Q_CONST = 1, Q_RESTRICT = 1 << 1, Q_VOLATILE = 1 << 2, Q_INLINE = 1 << 3, Q_STATIC = 1 << 4, Q_POINTER = 1 << 5, Q_VARLIST = 1 << 6
 };
 
-typedef struct TypeEntry{
+typedef struct scopeEntry{
 	char type, qual;
-	size_t length;
-	struct TypeEntry *ptype[];
-} TypeEntry;
+	char *start, *end;
+	size_t length, size;
+	struct scopeEntry *ptype[];
+} scopeEntry;
 
 /* AST flags */
 enum{
@@ -63,26 +64,10 @@ enum{
 typedef struct AST{
 	int ASTtype, length;
 	HashTable *scope;
-	TypeEntry *type;
+	scopeEntry *type;
 	char flags;
 	void* data[];
 } AST;
-
-typedef struct AST1{
-	int ASTtype, length;
-	HashTable *scope;
-	TypeEntry *type;
-	char flags;
-	void* data[1];
-} AST1;
-
-typedef struct AST2{
-	int ASTtype, length;
-	HashTable *scope;
-	TypeEntry *type;
-	char flags;
-	void* data[2];
-} AST2;
 
 AST *allocAST(int);
 void freeAST(AST *);
