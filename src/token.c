@@ -26,21 +26,23 @@ static const char *tokenName[] = {
 	"T_PPHEADER",
 
 	"T_WS",
-	"T_PPEXTRA"
+	"T_PPEXTRA",
+	"T_EOF"
 };
 
 void
 printToken(Token *tok)
 {
-	printf("%-15s: %lld %lf \"%.*s\"\n", tokenName[tok->token], tok->intValue, tok->floatValue, (int)(tok->end - tok->start), tok->start);
+	printf("%-15s: \"%.*s\"\n", tokenName[tok->token], (int)(tok->end - tok->start), tok->start);
 }
 
 void
 printTokens(Token *tok)
 {
-	printToken(tok);
-	if(tok->next)
+	if(tok){
+		printToken(tok);
 		printTokens(tok->next);
+	}	
 }
 
 Token*
@@ -55,6 +57,18 @@ freeToken(Token *tok)
 	if(tok->next)
 		freeToken(tok->next);
 	free(tok);
+}
+
+Token*
+initToken(int type, char *s, char *e)
+{
+	Token *tl = allocToken();
+	*tl = (Token){
+		.token = type,
+		.start = s,
+		.end = e,
+	};
+	return tl;
 }
 
 static int
@@ -79,6 +93,8 @@ scanCharLower(char **str, char ch)
 	return 0;
 }
 
+
+
 static void
 skipIntSufix(char **str)
 {
@@ -90,131 +106,96 @@ skipIntSufix(char **str)
 	*str = cur;
 }
 
-/* token parsing */
-
-static int
-decIntConst(char **str, Token *tok)
-{
-	long long v = 0;
-	char *cur = *str;
-	
-	if(*cur < '1' || *cur > '9')
-		return 0;
-
-	do 
-		v = v*10 + (*cur++ - '0');
-	while(ISDIGIT(*cur));
-	skipIntSufix(&cur);
-
-	*tok = (Token){
-		T_INTEGERCONST,
-		*str, 
-		cur,
-		.intValue = v
-	};
-
-	*str = cur;
-	return 1;
-}
-
-static int
-octIntConst(char **str, Token *tok)
-{
-	long long v = 0;
-	char *cur = *str;
-	if(*cur != '0')
-		return 0;
-
-	do
-		v = v*8 + (*cur++ - '0');
-	while(ISOCT(*cur));
-	skipIntSufix(&cur);
-	
-	*tok = (Token){
-		T_INTEGERCONST,
-		*str,
-		cur,
-		.intValue = v
-	};
-
-	*str = cur;
-	return 1;
-}
-
-static int
-hexIntConst(char **str, Token *tok)
-{
-	long long v = 0;
-	char *cur = *str;
-	if(*cur != '0' || (cur[1] | 32) != 'x' || !ISHEX(cur[2]))
-		return 0;
-
-	cur += 2;
-	do{
-		v = v*16 + HEXVAL(*cur);
-		cur++;
-	}while(ISHEX(*cur));
-	skipIntSufix(&cur);
-
-	*tok = (Token){
-		T_INTEGERCONST,
-		*str,
-		cur,
-		.intValue = v
-	};
-
-	*str = cur;
-	return 1;
-}
-
-// iso c99 54
-static int
-intConst(char **str, Token *tok)
-{
-	return decIntConst(str, tok) || hexIntConst(str, tok) || octIntConst(str, tok);
-}
-
 static int
 hexDigitSeq(char **str)
 {
-	char *cur = *str;
-	if(!ISHEX(*cur))
-		return 0;
-
-	do
-		cur++;
-	while(ISHEX(*cur));
-
-	*str = cur;
-	return 1;
+	if(ISHEX(**str)){
+		do 
+			(*str)++;
+		while(ISHEX(**str));
+		return 1;
+	}	
+	return 0;
 }
 
 static int
 digitSeq(char **str)
 {
+	if(ISDIGIT(**str)){
+		do 
+			(*str)++;
+		while(ISDIGIT(**str));
+		return 1;
+	}
+	return 0;
+}
+
+/* token parsing */
+
+static int
+decIntConst(char **str, Token **tok)
+{
 	char *cur = *str;
-	if(!ISDIGIT(*cur))
-		return 0;
+	if(digitSeq(&cur)){
+		skipIntSufix(&cur);
+		*tok = initToken(T_INTEGERCONST, *str, cur);
+		*str = cur;
+		return 1;
+	}
 
-	do 
-		cur++;
-	while(ISDIGIT(*cur));
+	return 0;
+}
 
-	*str = cur;
-	return 1;
+static int
+octIntConst(char **str, Token **tok)
+{
+	char *cur = *str;
+	if(scanChar(&cur, '0')){
+		do
+			cur++;
+		while(ISOCT(*cur));
+		skipIntSufix(&cur);
+		*tok = initToken(T_INTEGERCONST, *str, cur);	
+		*str = cur;
+		return 1;
+	}
+
+	return 0;
+}
+
+static int
+hexIntConst(char **str, Token **tok)
+{
+	char *cur = *str;
+	if(scanChar(&cur, '0') && scanCharLower(&cur, 'x') && hexDigitSeq(&cur)){ 
+		skipIntSufix(&cur);
+		*tok = initToken(T_INTEGERCONST, *str, cur);
+		*str = cur;
+		return 1;
+	}
+
+	return 0;
+}
+
+// iso c99 54
+static int
+intConst(char **str, Token **tok)
+{
+	return decIntConst(str, tok) || hexIntConst(str, tok) || octIntConst(str, tok);
 }
 
 // iso c99 57
 static int
-floatConst(char **str, Token *tok)
+floatConst(char **str, Token **tok)
 {
-	char *cur = *str;
+	char *cur = *str, *ccur;
+	int opt, opt1;
 	if(scanChar(&cur, '0') && scanCharLower(&cur, 'x')){
-		int opt = hexDigitSeq(&cur);
+		opt = hexDigitSeq(&cur);
 		if(scanChar(&cur, '.')){
-			int opt1 = hexDigitSeq(&cur);
+			opt1 = hexDigitSeq(&cur);
 			if(opt || opt1){
-				char *ccur = cur;
+				ccur = cur;
 				if(scanCharLower(&ccur, 'p')){
 					(void)(scanChar(&ccur, '+') || scanChar(&ccur, '-'));
 					if(digitSeq(&ccur))
@@ -226,11 +207,11 @@ floatConst(char **str, Token *tok)
 	}
 
 	cur = *str;
-	int opt = digitSeq(&cur);
+	opt = digitSeq(&cur);
 	if(scanChar(&cur, '.')){
-		int opt1 = digitSeq(&cur);
+		opt1 = digitSeq(&cur);
 		if(opt || opt1){
-			char *ccur = cur;
+			ccur = cur;
 			if(scanCharLower(&ccur, 'e')){
 				(void)(scanChar(&ccur, '+') || scanChar(&ccur, '-'));
 				if(digitSeq(&ccur))
@@ -245,31 +226,21 @@ floatConst(char **str, Token *tok)
 end:
 	(void)(scanCharLower(&cur, 'l') || scanCharLower(&cur, 'f'));
 
-	*tok = (Token){
-		T_FLOATCONST,
-		*str,
-		cur,
-		//TODO do it myself >:3
-		.floatValue = strtof(*str, NULL)
-	};
-
+	*tok = initToken(T_FLOATCONST, *str, cur);
 	*str = cur;
 	return 1;
 }
 
 // iso c99 53
 static int
-universalCharacterName(char **str, Token *tok){
+universalCharacterName(char **str, Token **tok){
 	char *cur = *str;
 	int j, i;
 	if(scanChar(&cur, '\\') && scanCharLower(&cur, 'u')){
-		tok->intValue = 0;
 		for(j = 0; j < 2; j++){
 			for(i = 0; i < 4; i++){
 				if(!ISHEX(*cur))
 					goto ret;
-	
-				tok->intValue = (tok->intValue << 4) + HEXVAL(*cur);
 				cur++;
 			}
 		}
@@ -280,25 +251,17 @@ ret:
 	if(j == 0)
 		return 0;
 
-	if(j == 1){
-		tok->intValue >>= i*4;
+	if(j == 1)
 		cur -= i;
-	}
 
-	*tok = (Token){
-		T_PPEXTRA, //B/C it shouldn't be a token
-		*str,
-		cur,
-		.intValue = tok->intValue //TODO find a use for this?
-	};
-	
+	*tok = initToken(T_PPEXTRA, *str, cur);
 	*str = cur;
 	return 1;
 }
 
 // iso c99 60
 static int
-escapeSequence(char **str, Token *tok)
+escapeSequence(char **str, Token **tok)
 {
 	char *cur = *str;
 
@@ -309,53 +272,28 @@ escapeSequence(char **str, Token *tok)
 		return 0;
 
 	switch((*cur)++){
-		case '\\': tok->intValue = '\\'; break;
-		case 'a': tok->intValue = '\a'; break;
-		case 'b': tok->intValue = '\b'; break;
-		case 'f': tok->intValue = '\f'; break;
-		case 'n': tok->intValue = '\n'; break;
-		case 'r': tok->intValue = '\r'; break;
-		case 't': tok->intValue = '\t'; break;
-		case 'v': tok->intValue = '\v'; break;
-		case '\'': tok->intValue = '\''; break;
-		case '\"': tok->intValue = '\"'; break; 
-		case '?': tok->intValue = '\?'; break;
-		case 'x': tok->intValue = 0;
-			if(!ISHEX(*cur))
+		case '\\':case 'a': case 'b': case 'f': case 'n': case 'r': case 't': case 'v': case '\'': case '\"': case '?': break;
+		case 'x': 
+			if(!hexDigitSeq(&cur))
 				return 0;
-
-			do{
-				tok->intValue = tok->intValue * 16 + HEXVAL(*cur);
-				cur++;
-			}while(ISHEX(*cur));
 		break;
 		default:
 			cur--;
 			if(ISOCT(*cur)){
-				tok->intValue = *cur - '0';
 				cur++;
 
-				if(ISOCT(*cur)){
-					tok->intValue = tok->intValue * 8 + *cur - '0';
+				if(ISOCT(*cur))
 					cur++;
-				}
 
-				if(ISOCT(*cur)){
-					tok->intValue = tok->intValue * 8 + *cur - '0';
+				if(ISOCT(*cur))
 					cur++;
-				}
-			}else{
-				return 0;
+
+				break;
 			}
+			return 0;
 	}
 
-	*tok = (Token){
-		T_PPEXTRA, //b/c shouldn't be a token
-		*str,
-		cur,
-		.intValue = tok->intValue //TODO use to generate actual strings
-	};
-
+	*tok = initToken(T_PPEXTRA, *str, cur);
 	*str = cur;
 	return 1;
 	
@@ -363,7 +301,7 @@ escapeSequence(char **str, Token *tok)
 
 // iso c99 59
 static int
-charConst(char **str, Token *tok)
+charConst(char **str, Token **tok)
 {
 	char *cur = *str;
 	//TODO wide strings?
@@ -373,18 +311,11 @@ charConst(char **str, Token *tok)
 		if(!escapeSequence(&cur, tok)){
 			if(*cur == '\'' || *cur == '\\' || *cur == '\n')
 				return 0;
-			tok->intValue = *cur;
 			cur++;
 		}
 
 		if(scanChar(&cur, '\'')){
-			*tok = (Token){
-				T_CHARCONST,
-				*str,
-				cur,
-				.intValue = tok->intValue
-			};
-
+			*tok = initToken(T_CHARCONST, *str, cur);
 			*str = cur;
 			return 1;
 		}
@@ -395,32 +326,35 @@ charConst(char **str, Token *tok)
 
 //iso c99 54
 static int
-constant(char **str, Token *tok)
+constant(char **str, Token **tok)
 {
 	return floatConst(str, tok) || intConst(str, tok) || charConst(str, tok);
 }
 
 // iso c99 62
 static int
-stringLit(char **str, Token *tok)
+stringLit(char **str, Token **tok)
 {
+	Token *tl;
 	char *cur = *str;
 	scanChar(&cur, 'L');
 
 	if(scanChar(&cur, '"')){
 		while(!scanChar(&cur, '"')){
-			if(scanChar(&cur, '\n') || (*cur == '\\' && !escapeSequence(&cur, tok)))
+			if(scanChar(&cur, '\n'))
 				return 0;
 
+			if(*cur == '\\'){
+				if(escapeSequence(&cur, &tl)){
+					freeToken(tl);
+					continue;
+				}
+				return 0;
+			}
 			cur++;
 		}
 
-		*tok = (Token){
-			T_STRINGLIT,
-			*str,
-			cur
-		};
-
+		*tok = initToken(T_STRINGLIT, *str, cur);
 		*str = cur;
 		return 1;
 	}
@@ -430,7 +364,7 @@ stringLit(char **str, Token *tok)
 
 //iso c99 51
 static int
-identifier(char **str, Token *tok)
+identifier(char **str, Token **tok)
 {
 	char *cur = *str;
 	if(!ISALPHA(*cur) && *cur != '_' && !universalCharacterName(&cur, tok))
@@ -439,23 +373,20 @@ identifier(char **str, Token *tok)
 	do cur++;
 	while(ISALPHA(*cur) || universalCharacterName(&cur, tok) || ISDIGIT(*cur) || *cur == '_');
 
-	*tok = (Token){	
-		T_IDENTIFIER,
-		*str,
-		cur
-	};
-
+	*tok = initToken(T_IDENTIFIER, *str, cur);
 	*str = cur;
 	return 1;
 }
 
 // iso c99 63
 static int
-punctuator(char **str, Token *tok)
+punctuator(char **str, Token **tok)
 {
 	// iso c99 50 EXAMPLE 2
 	static const char *words[] = {
-		"[", "]", "(", ")", "{", "}", "...", ".", "->", "++", "--", "*=", "/=", "%=", "+=", "-=", "<<=", ">>=", "&=", "^=", "|=", "<<", ">>", "<=", ">=", "<:", ":>", "<%", "%>", "%:%:", "%:",  "<", ">", "==", "=", "!=", "!", "&&", "||", "&", "*", "+", "-", "~", ":", ";", ",", "##", "#", "/", "^", "%", "|",
+		"[", "]", "(", ")", "{", "}", "...", ".", "->", "++", "--", "*=", "/=", "%=", "+=", "-=", "<<=", ">>=", "&=", "^=", "|=", "<<", ">>", "<=", ">=", 
+		//"<:", ":>", "<%", "%>", "%:%:", "%:", 
+		"<", ">", "==", "=", "!=", "!", "&&", "||", "&", "*", "+", "-", "~", ":", ";", ",", "##", "#", "/", "^", "%", "|",
 	
 		//TODO pre processor stuff
 		//"\?\?=\?\?=", "\?\?=", "\?\?(", "\?\?)", "\?\?<", "\?\?>", "\?\?/", "\?\?\'", "\?\?!", "\?\?-",
@@ -465,7 +396,10 @@ punctuator(char **str, Token *tok)
 	};
 
 	static int tokens[] = {
-		T_LBRACE, T_RBRACE, T_LPAREN, T_RPAREN, T_LCURLY, T_RCURLY, T_ELIPSIS, T_DOT, T_ARROW, T_INC, T_DEC, T_MULEQ, T_DIVEQ, T_MODEQ, T_ADDEQ, T_SUBEQ, T_LSHIFTEQ, T_RSHIFTEQ, T_ANDEQ, T_XOREQ, T_OREQ, T_LSHIFT, T_RSHIFT, T_LTEQ, T_GTEQ, T_LBRACE, T_RBRACE, T_LCURLY, T_RCURLY, T_PPCONCAT, T_POUND, T_LT, T_GT, T_EQUAL, T_EQ, T_NOTEQUAL, T_BANG, T_BAND, T_BOR, T_AND, T_STAR, T_PLUS, T_MINUS, T_TILDE, T_COLON, T_SEMI, T_COMMA, T_PPCONCAT, T_POUND, T_SLASH, T_XOR, T_PERCENT, T_OR,
+		T_LBRACE, T_RBRACE, T_LPAREN, T_RPAREN, T_LCURLY, T_RCURLY, T_ELIPSIS, T_DOT, T_ARROW, T_INC, T_DEC, T_MULEQ, T_DIVEQ, T_MODEQ, T_ADDEQ, T_SUBEQ, T_LSHIFTEQ, T_RSHIFTEQ, T_ANDEQ, T_XOREQ, T_OREQ, T_LSHIFT, T_RSHIFT, T_LTEQ, T_GTEQ, 
+		//T_LBRACE, T_RBRACE, T_LCURLY, T_RCURLY, T_PPCONCAT, T_POUND,
+
+	       	T_LT, T_GT, T_EQUAL, T_EQ, T_NOTEQUAL, T_BANG, T_BAND, T_BOR, T_AND, T_STAR, T_PLUS, T_MINUS, T_TILDE, T_COLON, T_SEMI, T_COMMA, T_PPCONCAT, T_POUND, T_SLASH, T_XOR, T_PERCENT, T_OR,
 		
 		//T_PPCONCAT, T_POUND, T_LBRACE, T_RBRACE, T_LCURLY, T_RCURLY, T_SLASH, T_XOR ,T_OR, T_TILDE,
 
@@ -481,12 +415,7 @@ punctuator(char **str, Token *tok)
 			index++;
 		}
 	
-		*tok = (Token){
-			tokens[word - words],
-			*str,
-			*str + index
-		};
-
+		*tok = initToken(tokens[word - words], *str, *str + index);
 		*str = *str + index;
 		return 1;
 	end:
@@ -497,7 +426,7 @@ punctuator(char **str, Token *tok)
 
 // iso c99 50
 static int
-keyword(char **str, Token *tok)
+keyword(char **str, Token **tok)
 {
 	static const char *words[] = {
 		"auto", "enum", "restrict", "unsigned", "break", "extern", "return", "void", "case", "float", "short", "volatile", "char", "for", "signed", "while", "const", "goto", "sizeof", "_Bool", "continue", "if", "static", "_Complex", "default", "inline", "struct", "_Imaginary", "do", "int", "switch", "double", "long", "typedef", "else", "register", "union", NULL
@@ -516,12 +445,7 @@ keyword(char **str, Token *tok)
 			index++;
 		}
 	
-		*tok = (Token){	
-			tokens[word - words],
-			*str,
-			*str + index
-		};
-
+		*tok = initToken(tokens[word - words], *str, *str + index);
 		*str = *str + index;
 		return 1;
 	end:
@@ -531,23 +455,11 @@ keyword(char **str, Token *tok)
 	return 0;
 }
 
-static int
-ppExtra(char **str, Token *tok)
-{
-	*tok = (Token){
-		T_PPEXTRA,
-		*str,
-		*str + 1
-	};
-
-	(*str)++;
-	return 1;
-}
-
 // iso c99 66 iso c99 184
 static int
-whiteSpace(char **str, Token *tok)
+whiteSpace(char **str, Token **tok)
 {
+	//TODO preprocessor
 	char *cur = *str;
 
 	while(1){
@@ -569,12 +481,7 @@ whiteSpace(char **str, Token *tok)
 				cur--;
 		}
 
-		*tok = (Token){
-			T_WS,
-			*str,
-			cur
-		};
-
+		*tok = initToken(T_WS, *str, cur);
 		*str = cur;
 		return 1;
 	}
@@ -582,25 +489,52 @@ whiteSpace(char **str, Token *tok)
 
 // iso c99 49
 static int
-token(char **str, Token *tok)
+token(char **str, Token **tok)
 {
-	//TODO preprocessor
 	whiteSpace(str, tok);
-	return keyword(str, tok) || identifier(str, tok) || constant(str, tok) || stringLit(str, tok) || punctuator(str, tok) || ppExtra(str, tok);
+	return keyword(str, tok) || identifier(str, tok) || constant(str, tok) || stringLit(str, tok) || punctuator(str, tok);
+}
+
+static int
+eof(char **str, Token **tok)
+{
+	//TODO actually test for eof
+	//if(*str == NULL || scanChar(str, 0)){
+		*tok = initToken(T_EOF, NULL, NULL);
+		(*tok)->next = NULL;
+		return 1;
+	//}
+
+	return 0;
+}
+
+static int
+tokens(char **str, Token **tok)
+{
+	Token *tl = NULL;
+	char *cur = *str;
+	if(token(&cur, &tl)){
+		(void)(tokens(&cur, &(tl->next)) || eof(&cur, &(tl->next)));
+		*tok = tl;
+		*str = cur;
+		return 1;
+	}
+	return 0;
 }
 
 Token*
-genTokens(char **str)
+genTokens(char *str)
 {
-	Token *tok = allocToken();
-	Token *tl = tok;
-	char *cur = *str;
-	while(1){
-		token(&cur, tl);
-		if(tl->token == T_PPEXTRA)
-			return tok;
-		tl->next = allocToken();
-		tl = tl->next; 
+	Token *tl;
+	char *cur = str;
+
+
+
+	if(str == NULL || !tokens(&cur, &tl)){
+		tl = initToken(T_EOF, NULL, NULL);
+		tl->next = NULL;
 	}
+
+	return tl;
 }
 
