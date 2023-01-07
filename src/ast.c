@@ -1768,11 +1768,19 @@ genAST(Token *tok)
 	AST *lt;
 	Token *tmp = tok;
 	if(translationUnit(&tmp, &lt)){
-		if(tmp->token != T_EOF){
-			freeAST(lt);
-			return NULL;
+		if(tmp->token == T_EOF){
+			return lt;
 		}
-		return lt;
+		freeAST(lt);
 	}
-	return NULL;
+
+	printf("could not generate ast\n");
+	lt = allocAST(0);
+	*lt = (AST){
+		.ASTtype = A_TRANSLATIONUNIT,
+		.flags = AF_NODE,
+		.length = 0
+	};
+
+	return lt;
 }
