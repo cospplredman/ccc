@@ -49,7 +49,7 @@ freeToken(Token *tok)
 	free(tok);
 }
 
-static Token*
+Token*
 initToken(int type, char *s, char *e)
 {
 	Token *tl = allocToken();
@@ -513,6 +513,7 @@ tokens(char **str, Token **tok)
 		tl->next = NULL;
 		freeToken(tl);
 	}
+
 	return 0;
 }
 

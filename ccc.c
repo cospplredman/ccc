@@ -31,7 +31,8 @@ int main(int argc, char **argv){
 		char *str = readFile(argv[i]);
 		Token *tok = genTokens(str);
 		AST *ast = genAST(tok);
-		
+	
+		printToken(tok);	
 		printAST(ast);
 
 		free(str);

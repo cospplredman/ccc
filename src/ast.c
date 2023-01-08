@@ -30,7 +30,7 @@ allocAST(int entries)
 	return (AST*)malloc(sizeof(AST) + sizeof(void*)*entries);
 }
 
-static AST*
+AST*
 initNode(int type, AST *l, AST *r)
 {
 	AST *tl = allocAST(2);
@@ -46,7 +46,7 @@ initNode(int type, AST *l, AST *r)
 	return tl;
 }
 
-static AST*
+AST*
 initUNode(int type, AST *l)
 {
 	AST *tl = allocAST(1);
@@ -77,7 +77,7 @@ initStrNode(int type, char *s, char *e)
 	return tl;
 }
 
-static int
+int
 scanToken(Token **tok, int token)
 {
 	if((*tok)->token == token){
@@ -181,7 +181,7 @@ Sequence_(int (*of)(Token**, AST**), int type, Token **tok, AST **ast, int c)
 	return 0;
 }
 
-static int
+int
 Sequence(int (*of)(Token**, AST**), int type, Token **tok, AST **ast)
 {
 	return Sequence_(of, type, tok, ast, 0);
@@ -1768,9 +1768,8 @@ genAST(Token *tok)
 	AST *lt;
 	Token *tmp = tok;
 	if(translationUnit(&tmp, &lt)){
-		if(tmp->token == T_EOF){
+		if(tmp->token == T_EOF)
 			return lt;
-		}
 		freeAST(lt);
 	}
 
