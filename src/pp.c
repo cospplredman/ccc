@@ -2,203 +2,43 @@
 #include<stdlib.h>
 #include"pp.h"
 
-#define ISDIGIT(a) ((a) >= '0' && (a) <= '9')
-#define ISOCT(a)   ((a) >= '0' && (a) <= '7')
-#define ISHEX(a)   (((a) >= '0' && (a) <= '9') || (((a) | 32) >= 'a' && ((a) | 32) <= 'f'))
-#define HEXVAL(b)  (ISDIGIT(b) ? ((b) - '0') : (((b) | 32) - 'a' + 10))
-#define ISALPHA(a) (((a) | 32) >= 'a' && ((a) | 32) <= 'z')
-
-int identifier(char **, Token **);
-int charConst(char **, Token **);
-int stringLit(char **, Token **);
-int punctuator(char **, Token **);
-Token *initToken(int, char *, char *);
-int Sequence(int (*)(Token **, AST **), int, Token **, AST **);
-
-/* util functions */
-
-void
-printPPToken(PPToken *)
-{
-	//TODO
-}
-
-PPToken*
-allocPPToken()
-{
-	return allocToken();
-}
-
-void
-freePPToken(PPToken *tok)
-{
-	freeToken(tok);
-}
-
-static PPToken *
-initPPToken(int type, char *s, char *e)
-{
-	return initToken(type, s, e);
-}
-
-int scanChar(char **str, char ch);
-int scanCharLower(char **str, char ch);
-
-/* pptoken stuff */
-
-// iso c99 64
-static int
-headerName(char **str, PPToken **tok)
-{
-	char *cur = *str;
-	if(scanChar(&cur, '<')){
-		while(*cur != '>'){
-			if(*cur == '\n')
-				return 0;
-			cur++;
-		}
-	}else if(scanChar(&cur, '"')){
-		while(*cur != '"'){
-			if(*cur == '\n')
-				return 0;
-			cur++;
-		}
-	}else{
-		return 0;
-	}
-
-	*tok = initPPToken(PPT_PPHEADER, *str, cur);
-	*str = cur;
-	return 1;
-}
-
-// iso c99 65
-static int
-ppnumber(char **str, PPToken **tok)
-{
-	char *cur = *str;
-
-	if(ISDIGIT(*cur) || scanChar(&cur, '.') && ISDIGIT(*cur)){
-		cur++;
-		while(1){
-			if(ISDIGIT(*cur) || ISALPHA(*cur)){
-				cur++;
-				continue;
-			}
-
-			if(scanChar(&cur, '_') || scanCharLower(&cur, 'e') || scanCharLower(&cur, 'p') || scanChar(&cur, '.'))
-				continue;
-
-			break;
-		}
-
-		*tok = initPPToken(PPT_PPNUMBER, *str, cur);
-		*str = cur;
-		return 1;
-	}
-
-	return 0;
-}
-
-// iso c99 49
-static int
-ppextra(char **str, PPToken **tok)
-{
-	if(*str){
-		*tok = initPPToken(PPT_PPEXTRA, *str, *str + 1);
-		*str = *str + 1;
-		return 1;
-	}
-
-	return 0;
-}
-
-// iso c99 49
-static int
-pptoken(char **str, PPToken **tok)
-{
-	return identifier(str, tok) || ppnumber(str, tok) || charConst(str, tok) || stringLit(str, tok) || punctuator(str, tok) || headerName(str, tok);	
-}
-
-static int
-pptokens(char **str, PPToken **tok)
-{
-	PPToken *tl = NULL;
-	char *cur = *str;
-	if(pptoken(&cur, &tl)){
-		if(pptokens(&cur, &(tl->next)) || ppextra(&cur, &(tl->next))){
-			*tok = tl;
-			*str = cur;
-			return 1;
-		}
-		tl->next = NULL;
-		freeToken(tl);
-	}
-
-	return 0;
-}
-
-PPToken *genPPToken(char *)
-{
-	PPToken *tl;
-	char *cur;	
-
-	if(cur && pptokens(&cur, &tl))
-		return tl;
-
-	printf("could not parse pptokens\n");
-	tl = initPPToken(PPT_PPEXTRA, NULL, NULL);
-	tl->next = NULL;
-	return tl;
-}
-
-
 /* ppast stuff */
 
 AST *initNode(int, AST *, AST *);
 AST *initUNode(int, AST *);
+AST *initStrNode(int, char *, char *);
 int scanToken(Token **, int);
+int elvisExpr(Token **, AST **);
 
-void 
-printPPAST(PPAST *)
-{
-	//TODO
-}
+int scanString(char **, const char *);
 
-PPAST*
-allocPPAST(int size)
-{
-	return allocAST(size);
-}
-
-void
-freePPAST(PPAST *ast)
-{
-	return freeAST(ast);
-}
-
-static PPAST*
-initPPNode(int type, PPAST* l, PPAST* r)
-{
-	return initNode(type, l, r);
-}
-
-static PPAST*
-initUPPNode(int type, PPAST* l)
-{
-	return initUNode(type, l);
-}
+int Sequence(int (*)(Token **, AST **), int, Token **, AST **);
+int identifier(Token **, AST **);
 
 static int
-scanPPToken(PPToken **tok, int type)
+scanAST(int (*of)(Token **, AST **), AST **ast, char *s, char *e)
 {
-	return scanToken(tok, type);
+	//TODO make this thread safe	
+	char temp = *e;
+	*e = 0;
+	Token *t = genTokens(s), *tt = t;
+	*e = temp;
+	AST *tl;
+	if(of(&tt, &tl)){
+		if(tt->token == T_EOF){
+			freeToken(t);
+			*ast = tl;
+			return 1;
+		}
+		freeAST(tl);
+	}
+	freeToken(t);
+	return 0;
 }
 
-//TODO figure out what stays
 // iso c99 146
 static int
-pptoken___(PPToken **tok, PPAST **ast)
+replacementList(Token **tok, AST **ast)
 {
 	//TODO
 	return 0;
@@ -206,161 +46,365 @@ pptoken___(PPToken **tok, PPAST **ast)
 
 // iso c99 146
 static int
-replacementList(PPToken **tok, PPAST **ast)
+textLine(Token **tok, AST **ast)
 {
-	//TODO
+	Token *tmp = *tok, *ttmp;
+	if(!scanToken(&tmp, T_POUND)){
+		while(tmp && tmp->token != T_WS)
+			tmp = tmp->next;
+
+		ttmp = tmp;
+		if(scanToken(&ttmp, T_WS)){
+			char *s = (*tok)->start, *e = tmp->start;
+			*tok = ttmp;
+			*ast = initStrNode(PPA_PPTEXTLINE, s, e);
+			return 1;
+		}
+	}
 	return 0;
 }
 
 // iso c99 146
 static int
-lparen(PPToken **tok, PPAST **ast)
+controlLine(Token **tok, AST **ast)
 {
-	//TODO
-	return 0;
-}
+	AST *tl, *tm, *tr;
+	Token *tmp = *tok, *ttmp;
+	if(scanToken(&tmp, T_POUND)){
+		char *s = tmp->start;
+		if(scanString(&s, "include") && s == tmp->end){
+			tmp = tmp->next;
+			ttmp = tmp;
 
-// iso c99 146
-static int
-textLine(PPToken **tok, PPAST **ast)
-{
-	//TODO
-	return 0;
-}
+			if(scanToken(&ttmp, T_STRINGLIT)){
+				if(scanToken(&ttmp, T_WS)){
+					*ast = initStrNode(PPA_PPINCLUDE, tmp->start, tmp->end);
+					*tok = ttmp;
+					return 1;	
+				}
+			}
 
-// iso c99 146
-static int
-controlLine(PPToken **tok, PPAST **ast)
-{
-	//TODO
+			ttmp = tmp;
+			char *s = ttmp->start;
+			if(scanToken(&ttmp, T_LT)){
+				while(ttmp && ttmp->token != T_GT){
+					ttmp = ttmp->next;
+				}
+
+				char *e = ttmp->end;
+				if(scanToken(&ttmp, T_GT) && scanToken(&ttmp, T_WS)){
+					*ast = initStrNode(PPA_PPINCLUDE, s, e);
+					*tok = ttmp;
+					return 1;
+				}
+			}	
+		}
+		
+		s = tmp->start;
+		if(scanString(&s, "define") && s == tmp->end){
+			ttmp = tmp->next;
+			char *s = ttmp->start, *e = ttmp->end;
+			if(scanToken(&ttmp, T_IDENTIFIER)){
+				char *q = ttmp->end;
+				if(scanToken(&ttmp, T_LPAREN) && ttmp->start == q){
+					//TODO
+				}
+			}
+		}
+		
+		s = tmp->start;
+		if(scanString(&s, "undef") && s == tmp->end){
+			ttmp = tmp->next;
+			if(identifier(&ttmp, &tl)){
+				if(scanToken(&ttmp, T_WS)){
+					*ast = initUNode(PPA_PPUNDEF, tl);
+					*tok = ttmp;
+					return 1;
+				}
+				freeAST(tl);
+			}
+
+		}
+		
+		s = tmp->start;
+		if(scanString(&s, "line") && s == tmp->end){
+			ttmp = tmp->next;
+		}
+		
+		s = tmp->start;
+		if(scanString(&s, "error") && s == tmp->end){
+			char *s = tmp->end;
+			ttmp = tmp->next;
+			if(textLine(&ttmp, &tl)){
+				tl->ASTtype = PPA_PPERROR;
+				*ast = tl;
+				*tok = ttmp;
+				return 1;
+			}
+		}
+		
+		s = tmp->start;
+		if(scanString(&s, "pragma") && s == tmp->end){
+			ttmp = tmp->next;	
+		}
+
+		if(scanToken(&tmp, T_WS)){
+			*tok = tmp;
+			*ast = NULL;
+			return 1;
+		}
+	}
+
 	return 0;
 }
 
 // iso c99 145
 static int
-endifLine(PPToken **tok, PPAST **ast)
+endifLine(Token **tok, AST **ast)
 {
-	//TODO
+	Token *tmp = *tok;
+	if(scanToken(&tmp, T_POUND)){
+		char *s = tmp->start;
+		if(scanString(&s, "endif") && s == tmp->end){
+			tmp = tmp->next;
+			if(scanToken(&tmp, T_WS)){
+				*tok = tmp;
+				return 1;
+			}
+		}
+	}
+	return 0;
+}
+
+static int group(Token **tok, AST **ast);
+
+// iso c99 145
+static int
+elseGroup(Token **tok, AST **ast)
+{
+	AST *tl = NULL;
+	Token *tmp = *tok;
+	if(scanToken(&tmp, T_POUND)){
+		char *s = tmp->start;
+		if(scanString(&s, "else") && s == tmp->end){
+			tmp = tmp->next;
+			if(scanToken(&tmp, T_WS)){
+				group(&tmp, &tl);
+				*ast = initUNode(PPA_PPELSEGROUP, tl);
+				*tok = tmp;
+				return 1;
+			}
+		}
+	}
 	return 0;
 }
 
 // iso c99 145
 static int
-elseGroup(PPToken **tok, PPAST **ast)
+elifGroup(Token **tok, AST **ast)
 {
-	//TODO
+	AST *tl, *tr = NULL; 
+	Token *tmp = *tok;
+	if(scanToken(&tmp, T_POUND)){
+		char *s = tmp->start;
+		if(scanString(&s, "elif") && s == tmp->end){
+			tmp = tmp->next;
+			
+			s = tmp->start;
+			while(tmp && tmp->token != T_WS)
+				tmp = tmp->next;
+			char *e = tmp->start;
+
+			if(scanAST(elvisExpr, &tl, s, e)){
+				if(scanToken(&tmp, T_WS)){
+					group(&tmp, &tr);
+					*ast = initNode(PPA_PPELIFGROUP, tl, tr);
+					*tok = tmp;
+					return 1;
+				}
+				freeAST(tl);
+			}
+		}
+	}
+
 	return 0;
 }
 
 // iso c99 145
 static int
-elifGroup(PPToken **tok, PPAST **ast)
+elifGroups(Token **tok, AST **ast)
 {
-	//TODO
+	return Sequence(elifGroup, PPA_PPELIFGROUPS, tok, ast);
+}
+
+// iso c99 145
+static int
+ifGroup(Token **tok, AST **ast)
+{
+	AST *tl, *tr = NULL;
+	Token *tmp = *tok, *ttmp;
+	if(scanToken(&tmp, T_POUND)){
+		if(tmp->token == T_IDENTIFIER){
+			char *s = tmp->start;
+			if(scanString(&s, "if") && s == tmp->end){
+				ttmp = tmp->next;
+
+				/* this is really gross but will work for now :)*/
+				while(ttmp && ttmp->token != T_WS)
+					ttmp = ttmp->next;
+				char *e = ttmp->start;
+
+				//TODO defined unary operator
+				if(scanAST(elvisExpr, &tl, s, e)){
+					if(scanToken(&ttmp, T_WS)){
+						group(&ttmp, &tr);
+						printAST(tr);
+						*ast = initNode(PPA_PPIFGROUP, tl, tr);
+						*tok = ttmp;
+						return 1;
+					}
+					freeAST(tl);
+				}
+			}
+
+			s = tmp->start;
+			if(scanString(&s, "ifndef") && s == tmp->end){
+				ttmp = tmp->next;
+				if(identifier(&ttmp, &tl)){
+					if(scanToken(&ttmp, T_WS)){
+						group(&ttmp, &tr);
+						*ast = initNode(PPA_PPIFNDEFGROUP, tl, tr);
+						*tok = ttmp;
+						return 1;
+					}
+					freeAST(tl);
+				}
+			}
+
+			s = tmp->start;
+			if(scanString(&s, "ifdef") && s == tmp->end){
+				ttmp = tmp->next;
+				if(identifier(&ttmp, &tl)){
+					if(scanToken(&ttmp, T_WS)){
+						group(&ttmp, &tr);
+						*ast = initNode(PPA_PPIFDEFGROUP, tl, tr);
+						*tok = ttmp;
+						return 1;
+					}
+					freeAST(tl);
+				}
+			}
+		}
+	}
+
 	return 0;
 }
 
 // iso c99 145
 static int
-elifGroups(PPToken **tok, PPAST **ast)
+ifSection(Token **tok, AST **ast)
 {
-	return Sequence(elifGroup, PPA_PPELIFGROUP, tok, ast);
-}
-
-// iso c99 145
-static int
-ifGroup(PPToken **tok, PPAST **ast)
-{
-	//TODO
-	return 0;
-}
-
-// iso c99 145
-static int
-ifSection(PPToken **tok, PPAST **ast)
-{
-	PPAST *tl, *tml = NULL, *tmr = NULL, *tr;
-	PPToken *tmp = *tok;
+	AST *tl, *tml = NULL, *tmr = NULL, *tr;
+	Token *tmp = *tok;
 	if(ifGroup(&tmp, &tl)){
 		elifGroups(&tmp, &tml);
 		elseGroup(&tmp, &tmr);
 		if(endifLine(&tmp, &tr)){
-			*ast = allocPPAST(4);
-			**ast = (PPAST){
+			*ast = allocAST(3);
+			**ast = (AST){
 				.ASTtype = PPA_PPIFSECTION,
 				.flags = AF_NODE,
-				.length = 4
+				.length = 3
 			};
 
 			(*ast)->data[0] = tl;
 			(*ast)->data[1] = tml;
 			(*ast)->data[2] = tmr;
-			(*ast)->data[3] = tr;
+			freeAST(tr);
 			*tok = tmp;
 			return 1;
 		}
-		freePPAST(tl);
-		freePPAST(tml);
-		freePPAST(tmr);
+		freeAST(tl);
+		freeAST(tml);
+		freeAST(tmr);
 	}
 	return 0;
 }
 
 // iso c99 145
 static int
-nonDirective(PPToken **tok, PPAST **ast)
+nonDirective(Token **tok, AST **ast)
 {
-	//TODO
+	static const char *direc[] = {"include", "define", "if", "ifdef", "ifndef", "error", "pragma", "undef", "elif", "else", "endif", NULL};
+
+	Token *tmp = *tok;
+	char *s = tmp->start, *e = tmp->end;
+	if(scanToken(&tmp, T_IDENTIFIER)){
+		const char **cur = direc;
+		while(*cur){
+			if(scanString(&s, *cur))
+				return 0;
+			cur++;
+		}
+
+	}
+	
+	if(textLine(tok, ast)){
+		(*ast)->ASTtype = PPA_PPNONDIRECTIVE;
+		return 1;
+	}
+
 	return 0;
 }
 
 // iso c99 145
 static int
-groupPart(PPToken **tok, PPAST **ast)
+groupPart(Token **tok, AST **ast)
 {
-	PPAST *lt;
-	PPToken *tmp = *tok;
-	if(scanPPToken(&tmp, T_POUND) && nonDirective(&tmp, &lt)){
+	AST *lt;
+	Token *tmp = *tok;
+	
+	if(ifSection(tok, ast) || controlLine(tok, ast) || textLine(tok, ast))
+		return 1;
+
+	if(scanToken(&tmp, T_POUND) && nonDirective(&tmp, &lt)){
 		*ast = lt;	
 		*tok = tmp;
 		return 1;
 	}
+	return 0;
 
-	return ifSection(tok, ast) || controlLine(tok, ast) || textLine(tok, ast);
 }
 
 // iso c99 145
 static int
-group(PPToken **tok, PPAST **ast)
+group(Token **tok, AST **ast)
 {
 	return Sequence(groupPart, PPA_PPGROUP, tok, ast);
 }
 
 // iso c99 145
 static int
-preprocessingFile(PPToken **tok, PPAST **ast)
+preprocessingFile(Token **tok, AST **ast)
 {
-	if(Sequence(group, PPA_PPFILE, tok, ast))
-		return 1;
-	
-	*ast = initUPPNode(PPA_PPFILE, NULL);
-	return 1;
+	return Sequence(group, PPA_PPFILE, tok, ast);
 }
 
-PPAST*
-genPPAST(PPToken *tok)
+AST*
+genPPAST(Token *tok)
 {
-	PPAST *lt;
-	PPToken *tmp = tok;
+	AST *lt;
+	Token *tmp = tok;
 	if(preprocessingFile(&tmp, &lt)){
-		if(tmp->token == PPT_PPEXTRA)
+		//if(tmp->token == PPT_PPEXTRA)
 			return lt;
-		freeAST(lt);
+		//printAST(lt);
+		//freeAST(lt);
 	}
 
 	printf("could not generate ppast\n");
-	lt = allocPPAST(0);
-	*lt = (PPAST){
+	lt = allocAST(0);
+	*lt = (AST){
 		.ASTtype = PPA_PPFILE,
 		.flags = AF_NODE,
 		.length = 0	
@@ -369,4 +413,3 @@ genPPAST(PPToken *tok)
 	return lt;
 }
 
-Token *ppttt(PPToken *);

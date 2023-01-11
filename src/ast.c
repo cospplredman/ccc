@@ -61,7 +61,7 @@ initUNode(int type, AST *l)
 	return tl;
 }
 
-static AST*
+AST*
 initStrNode(int type, char *s, char *e)
 {
 	AST *tl = allocAST(2);
@@ -80,7 +80,7 @@ initStrNode(int type, char *s, char *e)
 int
 scanToken(Token **tok, int token)
 {
-	if((*tok)->token == token){
+	if(*tok && (*tok)->token == token){
 		*tok = (*tok)->next;
 		return 1;
 	}
@@ -263,7 +263,9 @@ static const char* astName[] = {
 	"A_POINTER", "A_IDENTLIST", "A_PARAMLIST", "A_PARAMDECL", "A_PARAMTYPELIST", "A_DIRECTDECLARATOR", "A_QUALLIST",
 	"A_DIRECTABSTRACTDECL", "A_ABSTRACTDECLARATOR", "A_TYPENAME",
 	"A_LABELSTATEMENT", "A_FOR", "A_WHILE", "A_DOWHILE", "A_FORLIST", "A_BLOCK", "A_RETURN", "A_CONTINUE", "A_BREAK", "A_SWITCH", "A_GOTO", "A_IFELSE", "A_IF", "A_BLOCKLIST", "A_EMPTYSTATEMENT",
-	"A_DECLARATIONLIST", "A_FUNCDECL", "A_TRANSLATIONUNIT", "A_DVLA", "A_VLA", "A_EPL"
+	"A_DECLARATIONLIST", "A_FUNCDECL", "A_TRANSLATIONUNIT", "A_DVLA", "A_VLA", "A_EPL",
+
+	"PPA_PPFILE", "PPA_PPGROUP", "PPA_PPELIFGROUP", "PPA_PPIFSECTION", "PPA_PPINCLUDE", "PPA_PPUNDEF", "PPA_PPELSEGROUP", "PPA_PPIFGROUP", "PPA_PPELIFGROUPS", "PPA_PPERROR", "PPA_PPIFNDEFGROUP", "PPA_PPIFDEFGROUP", "PPA_PPTEXTLINE", "PPA_PPNONDIRECTIVE"
 };
 
 static void
@@ -306,7 +308,7 @@ printAST(AST *ast)
 /* ast generation functions */
 
 // iso c99 69
-static int
+int
 identifier(Token **tok, AST **ast)
 {
 	Token *tmp = *tok;
@@ -678,7 +680,7 @@ borExpr(Token **tok, AST **ast)
 }
 
 // iso c99 90
-static int
+int
 elvisExpr(Token **tok, AST **ast)
 {
 	static const int lrpair[] = {T_QMARK, T_COLON};
@@ -836,7 +838,6 @@ directAbstractDeclarator(Token **tok, AST **ast)
 {
 	AST *tl = NULL, *tr = NULL;
 	Token *tmp = *tok;
-	printf("\nhi\n");
 
 	Capsule(abstractDeclarator, PAREN, &tmp, &tl);
 	Sequence(directAbstractSequence, A_DIRECTABSTRACTDECL, &tmp, &tr);

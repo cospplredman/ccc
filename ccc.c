@@ -1,7 +1,7 @@
 #include<stdio.h>
 #include<stdint.h>
 #include<stdlib.h>
-#include"src/ast.h"
+#include"src/pp.h"
 
 char* readFile(char *fn) {
 	FILE *f = fopen(fn, "r");
@@ -29,6 +29,13 @@ int main(int argc, char **argv){
 
 	for(int i = 0; i < argc; i++){
 		char *str = readFile(argv[i]);
+		Token *tok = genPPTokens(str);
+		printToken(tok);
+		printf("\n============\n");
+		AST *ast = genPPAST(tok);
+		printAST(ast);
+
+		/*
 		Token *tok = genTokens(str);
 		AST *ast = genAST(tok);
 	
@@ -38,6 +45,7 @@ int main(int argc, char **argv){
 		free(str);
 		freeToken(tok);
 		freeAST(ast);
+		*/
 	}
 	return 0;
 }
