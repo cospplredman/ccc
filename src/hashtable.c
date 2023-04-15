@@ -1,33 +1,34 @@
-#include<stddef.h>
 #include<stdlib.h>
 #include"hashtable.h"
 
 HashTable*
 allocHashTable(size_t size, size_t itemsz)
 {
-	HashTable *table = malloc(sizeof(HashTable));
-	table->val = malloc(size*itemsz);
+	HashTable *table = malloc(sizeof(HashTable) + itemsz*size);
 	table->size = size;
-	table->itemsz = itemsz;
 	return table;
 }
 
 void
 freeHashTable(HashTable *table)
 {
-	free(table->val);
 	free(table);
 }
 
-void**
-getTablePtr(HashTable *table, void *val, size_t hash, int (*cmpfn)(void*, void*))
+void*
+getTablePtr_(HashTable *table, void *val, size_t itemsz, size_t hash, int (*cmpfn)(void*, void*))
 {
-	size_t retry = 0;
-	do{
-		size_t index = ((hash + retry) % table->size) * table->itemsz;
-		if(cmpfn(val, (char*)table->val + index))
-			return (void**)((char*)table->val + index);
-		retry++;
-	}while(retry < table->size);
-	return NULL;
+	void* item;
+	do item = table->data + (hash++ % table->size) * itemsz;
+	while(!cmpfn(val, item));
+	return item;
 }
+
+void
+mapHashTable(HashTable *table, size_t itemsz, void (*fn)(void*))
+{
+	void *end = table->data + table->size * itemsz;
+	for(void *item = table->data; item < end; item += itemsz)
+		fn(item);
+}
+

@@ -1,3 +1,6 @@
+#ifndef CCC_AST_H
+#define CCC_AST_H
+
 #include"token.h"
 #include"hashtable.h"
 
@@ -51,6 +54,11 @@ enum{
 	Q_CONST = 1, Q_RESTRICT = 1 << 1, Q_VOLATILE = 1 << 2, Q_INLINE = 1 << 3, Q_STATIC = 1 << 4, Q_POINTER = 1 << 5, Q_VARLIST = 1 << 6
 };
 
+typedef struct StrEntry{
+	size_t hash;
+	char *str;
+} StrEntry;
+
 typedef struct scopeEntry{
 	char type, qual;
 	char *start, *end;
@@ -76,3 +84,6 @@ AST *allocAST(int);
 void freeAST(AST *);
 void printAST(AST *);
 AST *genAST(Token *);
+
+#endif
+

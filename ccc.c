@@ -1,41 +1,23 @@
 #include<stdio.h>
 #include<stdint.h>
 #include<stdlib.h>
+#include"src/io.h"
 #include"src/pp.h"
-
-char* readFile(char *fn) {
-	FILE *f = fopen(fn, "r");
-	if(f && !fseek(f, 0, SEEK_END)){
-		long int length = ftell(f);
-		if (length != -1){
-			rewind(f);
-			char *buffer = malloc(length + 1);
-			if (buffer && fread(buffer, 1, length, f) == length) {
-				buffer[length] = 0;
-				fclose(f);
-				return buffer;
-			}
-			free(buffer);
-		}
-		fclose(f);
-	}
-
-	printf("failed to read file: \"%s\"\n", fn);
-	return NULL;
-}
 
 int main(int argc, char **argv){
 	argc--, argv++;
 
 	for(int i = 0; i < argc; i++){
-		char *str = readFile(argv[i]);
-		Token *tok = genPPTokens(str);
-		printToken(tok);
-		printf("\n============\n");
-		AST *ast = genPPAST(tok);
-		printAST(ast);
+		int len;
+		char *str = readFile(argv[i], &len);
+		//TODO use len
 
-		/*
+		//Token *tok = genPPTokens(str);
+		//printToken(tok);
+		//printf("\n============\n");
+		//AST *ast = genPPAST(tok);
+		//printAST(ast);
+
 		Token *tok = genTokens(str);
 		AST *ast = genAST(tok);
 	
@@ -45,7 +27,6 @@ int main(int argc, char **argv){
 		free(str);
 		freeToken(tok);
 		freeAST(ast);
-		*/
 	}
 	return 0;
 }

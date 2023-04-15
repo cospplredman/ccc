@@ -2,6 +2,47 @@
 #include<stdlib.h>
 #include<stddef.h>
 #include<stdio.h>
+#include"string.h"
+
+/* symbol table */
+
+static HashTable *symTable;
+
+void
+strHTinit(a)
+	StrEntry *a;
+{
+	*a = (StrEntry){
+		0,
+		NULL
+	};
+}
+
+size_t
+strHThash(char* a)
+{
+	size_t hash = 5381;
+	while(*a){
+		hash = ((hash << 5) + hash) + *a;
+		a++;
+	}
+		
+	return hash;
+}
+
+int
+strHTcmpfn(a, b)
+	StrEntry *a, *b;
+{
+	return b->str == NULL || (b->hash == a->hash && strcmp(b->str, a->str) == 0);
+}
+
+void
+strHTprint(a)
+	StrEntry *a;
+{
+	printf("%s ", a->str);
+}
 
 /* util functions */
 
@@ -934,6 +975,7 @@ paramTypeList(Token **tok, AST **ast)
 }
 
 static int typeQualifier(Token **, AST **);
+
 // iso c99 114
 static int
 typeQualifierList(Token **tok, AST **ast){
@@ -958,7 +1000,7 @@ directSequence(Token **tok, AST **ast)
 		typeQualifierList(&tmp, &tm);
 		if(scanToken(&tmp, T_STAR) && scanToken(&tmp, T_RBRACE)){
 			//TODO less jank
-			tl = initNode(A_DIRECTDECLARATOR, tm, NULL);
+			*ast = initUNode(A_DIRECTDECLARATOR, tm);
 			*tok = tmp;
 			return 1;
 		}	
@@ -971,7 +1013,7 @@ directSequence(Token **tok, AST **ast)
 		typeQualifierList(&tmp, &tm);
 		assignmentExpr(&tmp, &tr);
 		if(scanToken(&tmp, T_RBRACE)){
-			tl = initNode(A_DIRECTDECLARATOR, tl, initNode(A_DIRECTDECLARATOR, tm, tr));
+			*ast = initNode(A_DIRECTDECLARATOR, tm, tr);
 			*tok = tmp;
 			return 1;
 		}
@@ -984,13 +1026,13 @@ directSequence(Token **tok, AST **ast)
 		int opt = scanToken(&tmp, T_STATIC);
 		if(typeQualifierList(&tmp, &tm)){
 			if((opt || scanToken(&tmp, T_STATIC)) && assignmentExpr(&tmp, &tr)){
-				tl = initNode(A_DIRECTDECLARATOR, tl, initNode(A_DIRECTDECLARATOR, tm, tr));
+				*ast = initNode(A_DIRECTDECLARATOR, tm, tr);
 				*tok = tmp;
 				return 1;
 			}
 			freeAST(tm);
 		}else if(opt && assignmentExpr(&tmp, &tr)){
-			tl = initNode(A_DIRECTDECLARATOR, tl, tr);
+			*ast = initUNode(A_DIRECTDECLARATOR, tr);
 			*tok = tmp;
 			return 1;
 		}

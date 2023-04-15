@@ -1,3 +1,6 @@
+#ifndef CCC_TOKEN_H
+#define CCC_TOKEN_H
+
 enum{
 	/* tokens iso c99 49 */
 	//keywords iso c99 50
@@ -39,3 +42,5 @@ void freeToken(Token *tok);
 Token *genTokens(char *str);
 Token *genPPTokens(char *str);
 void printToken(Token *tok);
+
+#endif
